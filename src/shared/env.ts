@@ -1,6 +1,5 @@
 import { AppError } from "./errors.js";
-
-export type LogLevel = "debug" | "info" | "warn" | "error";
+import type { LogLevel } from "../ports/logger.port.js";
 
 export type ListenerEnv = {
   slackBotToken: string;

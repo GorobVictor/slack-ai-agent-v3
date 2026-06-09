@@ -1,6 +1,10 @@
 import { App, LogLevel } from "@slack/bolt";
 
 import type { LoggerPort } from "../../ports/logger.port.js";
+import type {
+  SendSlackMessageInput,
+  SlackMessengerPort,
+} from "../../ports/slack-messenger.port.js";
 import type { SlackSocketPort } from "../../ports/slack-socket.port.js";
 import { AppError } from "../../shared/errors.js";
 import type { SlackRawEventEnvelope } from "../../modules/slack-listener/slack-listener.types.js";
@@ -12,7 +16,7 @@ export type SlackSocketModeAdapterOptions = {
   logger: LoggerPort;
 };
 
-export class SlackSocketModeAdapter implements SlackSocketPort {
+export class SlackSocketModeAdapter implements SlackSocketPort, SlackMessengerPort {
   private readonly app: App;
   private readonly handlers: Array<(event: unknown) => Promise<void>> = [];
 
@@ -44,6 +48,14 @@ export class SlackSocketModeAdapter implements SlackSocketPort {
     }
 
     return response.user_id;
+  }
+
+  async sendMessage(input: SendSlackMessageInput): Promise<void> {
+    await this.app.client.chat.postMessage({
+      channel: input.channelId,
+      text: input.text,
+      thread_ts: input.threadTs,
+    });
   }
 
   private registerSlackEventHandlers(): void {

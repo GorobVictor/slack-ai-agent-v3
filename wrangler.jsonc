@@ -1,0 +1,31 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "slack-ai-agent-v3",
+  "main": "src/cmd/worker/index.ts",
+  "compatibility_date": "2026-06-09",
+  "compatibility_flags": ["nodejs_compat"],
+  "ai": {
+    "binding": "AI"
+  },
+  "vars": {
+    "AI_MODEL": "@cf/google/gemma-4-26b-a4b-it"
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "class_name": "SlackThinkAgent",
+        "name": "SLACK_THINK_AGENT"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "new_sqlite_classes": ["SlackThinkAgent"],
+      "tag": "v1"
+    }
+  ],
+  "observability": {
+    "enabled": true,
+    "head_sampling_rate": 1
+  }
+}

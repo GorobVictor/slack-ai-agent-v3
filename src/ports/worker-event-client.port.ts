@@ -1,5 +1,8 @@
-import type { NormalizedSlackMessageEvent } from "../modules/slack-listener/slack-listener.types.js";
+import type {
+  NormalizedSlackMessageEvent,
+  WorkerSlackReplyResponse,
+} from "../modules/slack/slack.types.js";
 
 export interface WorkerEventClientPort {
-  sendSlackMessageEvent(event: NormalizedSlackMessageEvent): Promise<void>;
+  sendSlackMessageEvent(event: NormalizedSlackMessageEvent): Promise<WorkerSlackReplyResponse>;
 }

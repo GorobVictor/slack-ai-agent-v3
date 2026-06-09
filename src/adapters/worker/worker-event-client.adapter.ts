@@ -1,7 +1,11 @@
 import type { WorkerEventClientPort } from "../../ports/worker-event-client.port.js";
 import { AppError } from "../../shared/errors.js";
 import { retry } from "../../tools/retry.tool.js";
-import type { NormalizedSlackMessageEvent } from "../../modules/slack-listener/slack-listener.types.js";
+import type {
+  NormalizedSlackMessageEvent,
+  WorkerSlackReplyResponse,
+} from "../../modules/slack/slack.types.js";
+import { parseWorkerSlackReplyResponse } from "../../modules/slack/slack.validation.js";
 
 export type WorkerEventClientAdapterOptions = {
   endpointUrl: string;
@@ -11,8 +15,10 @@ export type WorkerEventClientAdapterOptions = {
 export class WorkerEventClientAdapter implements WorkerEventClientPort {
   constructor(private readonly options: WorkerEventClientAdapterOptions) {}
 
-  async sendSlackMessageEvent(event: NormalizedSlackMessageEvent): Promise<void> {
-    await retry(
+  async sendSlackMessageEvent(
+    event: NormalizedSlackMessageEvent,
+  ): Promise<WorkerSlackReplyResponse> {
+    return retry(
       async () => {
         const response = await fetch(this.options.endpointUrl, {
           method: "POST",
@@ -29,6 +35,8 @@ export class WorkerEventClientAdapter implements WorkerEventClientPort {
             statusText: response.statusText,
           });
         }
+
+        return parseWorkerReplyResponse(await response.json());
       },
       {
         attempts: 3,
@@ -38,6 +46,16 @@ export class WorkerEventClientAdapter implements WorkerEventClientPort {
       },
     );
   }
+}
+
+export function parseWorkerReplyResponse(value: unknown): WorkerSlackReplyResponse {
+  const parsed = parseWorkerSlackReplyResponse(value);
+
+  if (!parsed) {
+    throw new AppError("WORKER_REPLY_INVALID", "Worker returned an invalid reply response");
+  }
+
+  return parsed;
 }
 
 function shouldRetryWorkerError(error: unknown): boolean {

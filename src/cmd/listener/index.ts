@@ -25,7 +25,13 @@ async function main(): Promise<void> {
     internalApiToken: env.workerInternalApiToken,
   });
   const trackedThreads = new InMemoryTrackedThreadStoreAdapter();
-  const listener = new SlackListenerUseCase(workerClient, trackedThreads, logger, botUserId);
+  const listener = new SlackListenerUseCase(
+    workerClient,
+    slackSocket,
+    trackedThreads,
+    logger,
+    botUserId,
+  );
 
   slackSocket.onMessage((event) => listener.handleRawSlackEvent(event));
 

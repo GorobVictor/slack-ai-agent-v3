@@ -1,5 +1,4 @@
-import type { LoggerPort } from "../../ports/logger.port.js";
-import type { LogLevel } from "../../shared/env.js";
+import type { LoggerPort, LogLevel } from "../../ports/logger.port.js";
 
 const LEVEL_WEIGHT: Record<LogLevel, number> = {
   debug: 10,

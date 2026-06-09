@@ -1,4 +1,5 @@
 import type { LoggerPort } from "../../ports/logger.port.js";
+import type { SlackMessengerPort } from "../../ports/slack-messenger.port.js";
 import type { TrackedThreadStorePort } from "../../ports/tracked-thread-store.port.js";
 import type { WorkerEventClientPort } from "../../ports/worker-event-client.port.js";
 import { decideSlackEventHandling } from "./slack-event-filter.js";
@@ -14,6 +15,7 @@ export class SlackListenerUseCase {
 
   constructor(
     private readonly workerClient: WorkerEventClientPort,
+    private readonly slackMessenger: SlackMessengerPort,
     trackedThreads: TrackedThreadStorePort,
     private readonly logger: LoggerPort,
     private readonly botUserId: string,
@@ -55,11 +57,20 @@ export class SlackListenerUseCase {
         await this.threadTracker.addThread(threadReference);
       }
 
-      await this.workerClient.sendSlackMessageEvent(event);
+      const workerReply = await this.workerClient.sendSlackMessageEvent(event);
+
+      if (workerReply.status === "reply") {
+        await this.slackMessenger.sendMessage({
+          channelId: event.channelId,
+          threadTs: workerReply.threadTs ?? event.threadTs ?? event.messageTs,
+          text: workerReply.text,
+        });
+      }
 
       this.logger.info("Forwarded Slack event to Worker", {
         ...safeMetadata,
         reason: decision.reason,
+        workerReplyStatus: workerReply.status,
         trackedThread: decision.shouldTrackThread,
       });
     } catch (error) {
