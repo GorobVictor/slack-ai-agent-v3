@@ -7,6 +7,7 @@ describe("decideSlackEventHandling", () => {
   it("always forwards app mentions and tracks their thread", () => {
     expect(decide("app_mention", { isMention: true })).toMatchObject({
       action: "forward",
+      processingIntent: "invoke",
       shouldTrackThread: true,
       reason: "app_mention",
     });
@@ -15,41 +16,47 @@ describe("decideSlackEventHandling", () => {
   it("forwards direct messages without requiring a mention", () => {
     expect(decide("message.im", { isMention: false })).toMatchObject({
       action: "forward",
+      processingIntent: "invoke",
       shouldTrackThread: false,
       reason: "direct_message",
     });
   });
 
-  it("does not forward unmentioned channel root messages", () => {
+  it("forwards unmentioned channel root messages as capture-only", () => {
     expect(decide("message.channels", { isMention: false })).toMatchObject({
-      action: "ignore",
+      action: "forward",
+      processingIntent: "capture",
       shouldTrackThread: false,
+      reason: "channel_capture",
     });
   });
 
   it("forwards and tracks channel messages that mention the bot", () => {
     expect(decide("message.channels", { isMention: true })).toMatchObject({
       action: "forward",
+      processingIntent: "invoke",
       shouldTrackThread: true,
       reason: "channel_mention",
     });
   });
 
-  it("forwards channel replies when the thread is already tracked", () => {
+  it("forwards tracked channel replies as capture-only", () => {
     expect(
       decide("message.groups", { isMention: false, isThreadMessage: true }, true),
     ).toMatchObject({
       action: "forward",
+      processingIntent: "capture",
       shouldTrackThread: false,
-      reason: "tracked_thread",
+      reason: "tracked_thread_capture",
     });
   });
 
-  it("forwards mpim conversations as DM-like conversations", () => {
+  it("forwards mpim conversations as capture-only unless mentioned", () => {
     expect(decide("message.mpim", { isMention: false })).toMatchObject({
       action: "forward",
+      processingIntent: "capture",
       shouldTrackThread: false,
-      reason: "mpim_conversation",
+      reason: "mpim_capture",
     });
   });
 });

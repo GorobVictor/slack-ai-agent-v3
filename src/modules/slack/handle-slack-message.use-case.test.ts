@@ -1,13 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import type { LoggerPort } from "../../ports/logger.port.js";
+import type { SlackMessageHistoryPort } from "../../ports/slack-message-history.port.js";
 import type { ThinkSessionPort } from "../../ports/think-session.port.js";
 import { HandleSlackMessageUseCase } from "./handle-slack-message.use-case.js";
-import type { NormalizedSlackMessageEvent } from "./slack.types.js";
+import type { SlackWorkerRequest } from "./slack.types.js";
 
 describe("HandleSlackMessageUseCase", () => {
   it("submits Slack messages to a resolved Think session", async () => {
-    const calls: Array<{ sessionId: string; event: NormalizedSlackMessageEvent }> = [];
+    const calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [];
+    const saved: SlackWorkerRequest[] = [];
     const useCase = new HandleSlackMessageUseCase(
       {
         async submitSlackMessage(input) {
@@ -15,15 +17,41 @@ describe("HandleSlackMessageUseCase", () => {
           return { text: "Hello from Think" };
         },
       } satisfies ThinkSessionPort,
+      history(saved),
       logger,
     );
 
-    await expect(useCase.execute(event({ threadTs: "1710000000.000100" }))).resolves.toEqual({
+    await expect(
+      useCase.execute(event({ processingIntent: "invoke", threadTs: "1710000000.000100" })),
+    ).resolves.toEqual({
       status: "reply",
       text: "Hello from Think",
       threadTs: "1710000000.000100",
     });
     expect(calls[0]?.sessionId).toBe("slack:T123:channel:C123:thread:1710000000.000100");
+    expect(saved).toHaveLength(1);
+  });
+
+  it("captures messages without invoking Think for capture-only events", async () => {
+    const calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [];
+    const saved: SlackWorkerRequest[] = [];
+    const useCase = new HandleSlackMessageUseCase(
+      {
+        async submitSlackMessage(input) {
+          calls.push(input);
+          return { text: "Should not be called" };
+        },
+      } satisfies ThinkSessionPort,
+      history(saved),
+      logger,
+    );
+
+    await expect(useCase.execute(event({ processingIntent: "capture" }))).resolves.toEqual({
+      status: "no_reply",
+      reason: "capture_only",
+    });
+    expect(saved).toHaveLength(1);
+    expect(calls).toEqual([]);
   });
 
   it("returns no_reply for empty Think responses", async () => {
@@ -33,10 +61,11 @@ describe("HandleSlackMessageUseCase", () => {
           return { text: " " };
         },
       } satisfies ThinkSessionPort,
+      history([]),
       logger,
     );
 
-    await expect(useCase.execute(event())).resolves.toEqual({
+    await expect(useCase.execute(event({ processingIntent: "invoke" }))).resolves.toEqual({
       status: "no_reply",
       reason: "empty_agent_reply",
     });
@@ -49,7 +78,25 @@ const logger: LoggerPort = {
   error() {},
 };
 
-function event(overrides: Partial<NormalizedSlackMessageEvent> = {}): NormalizedSlackMessageEvent {
+function history(saved: SlackWorkerRequest[]): SlackMessageHistoryPort {
+  return {
+    async saveMessage(event) {
+      saved.push(event);
+      return { status: "inserted" };
+    },
+    async findMessagesByChannelAndTimeRange() {
+      return [];
+    },
+    async findMessagesByThreadAndTimeRange() {
+      return [];
+    },
+    async findThreadMessagesByChannelAndTimeRange() {
+      return [];
+    },
+  };
+}
+
+function event(overrides: Partial<SlackWorkerRequest> = {}): SlackWorkerRequest {
   return {
     source: "slack",
     teamId: "T123",
@@ -61,6 +108,7 @@ function event(overrides: Partial<NormalizedSlackMessageEvent> = {}): Normalized
     isMention: false,
     isThreadMessage: false,
     idempotencyKey: "Ev123",
+    processingIntent: "invoke",
     ...overrides,
   };
 }

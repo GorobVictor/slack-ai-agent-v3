@@ -67,6 +67,40 @@ describe("normalizeSlackMessageEvent", () => {
     expect(normalized?.metadata.eventType).toBe("message.im");
   });
 
+  it("maps Slack channel types to plural message event kinds", () => {
+    const channel = normalizeSlackMessageEvent(
+      {
+        event: {
+          type: "message",
+          team: "T123",
+          channel: "C123",
+          channel_type: "channel",
+          user: "U123",
+          text: "channel message",
+          ts: "1710000000.000100",
+        },
+      },
+      BOT_USER_ID,
+    );
+    const group = normalizeSlackMessageEvent(
+      {
+        event: {
+          type: "message",
+          team: "T123",
+          channel: "G123",
+          channel_type: "group",
+          user: "U123",
+          text: "private channel message",
+          ts: "1710000000.000200",
+        },
+      },
+      BOT_USER_ID,
+    );
+
+    expect(channel?.metadata.eventType).toBe("message.channels");
+    expect(group?.metadata.eventType).toBe("message.groups");
+  });
+
   it("ignores bot, hidden, unsupported subtype, and empty text events without files", () => {
     const baseEvent = {
       type: "message",

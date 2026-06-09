@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import type { LoggerPort } from "../../ports/logger.port.js";
+import type { SlackMessageHistoryPort } from "../../ports/slack-message-history.port.js";
 import { HandleSlackMessageUseCase } from "./handle-slack-message.use-case.js";
 import { handleSlackEventRequest } from "./slack.handler.js";
-import type { NormalizedSlackMessageEvent } from "./slack.types.js";
+import type { SlackWorkerRequest } from "./slack.types.js";
 
 describe("handleSlackEventRequest", () => {
   it("rejects missing authorization", async () => {
@@ -50,6 +51,7 @@ function options() {
           return { text: "Hello from Think" };
         },
       },
+      history(),
       logger,
     ),
     logger,
@@ -70,7 +72,24 @@ const logger: LoggerPort = {
   error() {},
 };
 
-function event(overrides: Partial<NormalizedSlackMessageEvent> = {}): NormalizedSlackMessageEvent {
+function history(): SlackMessageHistoryPort {
+  return {
+    async saveMessage() {
+      return { status: "inserted" };
+    },
+    async findMessagesByChannelAndTimeRange() {
+      return [];
+    },
+    async findMessagesByThreadAndTimeRange() {
+      return [];
+    },
+    async findThreadMessagesByChannelAndTimeRange() {
+      return [];
+    },
+  };
+}
+
+function event(overrides: Partial<SlackWorkerRequest> = {}): SlackWorkerRequest {
   return {
     source: "slack",
     teamId: "T123",
@@ -82,6 +101,7 @@ function event(overrides: Partial<NormalizedSlackMessageEvent> = {}): Normalized
     isMention: false,
     isThreadMessage: false,
     idempotencyKey: "Ev123",
+    processingIntent: "invoke",
     ...overrides,
   };
 }
