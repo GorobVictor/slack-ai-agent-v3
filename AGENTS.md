@@ -11,13 +11,15 @@ This repository uses Cursor rules and skills to guide agent work. The primary pr
 - Use `@cloudflare/think` as the default runtime for AI agent behavior.
 - Keep `@cloudflare/think` imports in Think-specific agent or adapter files such as `src/modules/agent/think-agent.ts` and `src/adapters/think/think-session.adapter.ts`.
 - Keep Cloudflare bindings, Slack API calls, storage, and other external services behind ports and adapters.
+- Store passive Slack message history through `SlackMessageHistoryPort`; use D1 only inside storage adapters or the Worker composition root.
+- Preserve the reply rule: DMs and explicit mentions invoke Think, while unmentioned channel/group/MPIM messages are capture-only.
 - Write repository content in English.
 - Save approved Plan Mode plans under `proto/features/`.
 - Do not commit `checkpoint.md`, secrets, or local artifacts such as `.DS_Store`.
 
 ## Verification
 
-Run `npm run typecheck` and `npm test` before committing TypeScript changes. For Worker changes, also run `npx wrangler deploy --dry-run` when Wrangler is available and configured.
+Run `npm run typecheck` and `npm test` before committing TypeScript changes. For Worker changes, also run `npx wrangler deploy --dry-run` when Wrangler is available and configured. For D1 changes, keep migrations under `migrations/` and validate them with `npx wrangler d1 migrations apply <database-name> --local` when practical.
 
 ## Commit Workflow
 

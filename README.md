@@ -14,7 +14,7 @@ The Worker should stay thin at the entrypoint and delegate behavior through use 
 
 ## Slack Listener
 
-The Node.js Slack listener entrypoint is `src/cmd/listener/index.ts`. It connects to Slack through Socket Mode, normalizes eligible message events, tracks mentioned threads in memory, forwards accepted events to the Worker HTTP endpoint, and posts Worker replies back to Slack.
+The Node.js Slack listener entrypoint is `src/cmd/listener/index.ts`. It connects to Slack through Socket Mode, normalizes bot-visible message events, marks each event as `capture` or `invoke`, forwards it to the Worker HTTP endpoint, and posts Worker replies back to Slack.
 
 Run it locally with:
 
@@ -48,7 +48,7 @@ Use `npm run typecheck` and `npm test` before committing listener changes.
 
 ## Cloudflare Worker
 
-The Worker entrypoint is `src/cmd/worker/index.ts`. It exposes `POST /slack/events`, validates the internal bearer token, resolves a deterministic Slack session id, calls `SlackThinkAgent` through a Think session port, and returns a JSON reply for the listener to post.
+The Worker entrypoint is `src/cmd/worker/index.ts`. It exposes `POST /slack/events`, validates the internal bearer token, saves each message to D1 idempotently, resolves a deterministic Slack session id for invoke events, calls `SlackThinkAgent` through a Think session port, and returns a JSON reply for the listener to post.
 
 Run the Worker locally with:
 
@@ -68,15 +68,25 @@ Required Worker secret:
 WORKER_INTERNAL_API_TOKEN
 ```
 
+Create the Slack history D1 database before deployment, then replace the placeholder `database_id` in `wrangler.jsonc`:
+
+```sh
+npx wrangler d1 create slack-ai-agent-v3-history
+npx wrangler d1 migrations apply slack-ai-agent-v3-history
+```
+
 Worker bindings and non-secret defaults are configured in `wrangler.jsonc`:
 
 ```txt
 AI
 SLACK_THINK_AGENT
+SLACK_HISTORY_DB
 AI_MODEL
 ```
 
-The listener sends `NormalizedSlackMessageEvent` JSON and the Worker returns one of:
+The listener sends `SlackWorkerRequest` JSON. Channel, group, and MPIM messages without a bot mention are forwarded as `processingIntent: "capture"` and return `no_reply`. Direct messages and explicit bot mentions use `processingIntent: "invoke"` and may return a reply.
+
+The Worker returns one of:
 
 ```json
 { "status": "reply", "text": "Message text", "threadTs": "1710000000.000100" }
@@ -87,8 +97,14 @@ The listener sends `NormalizedSlackMessageEvent` JSON and the Worker returns one
 ```
 
 ```json
+{ "status": "no_reply", "reason": "capture_only" }
+```
+
+```json
 { "status": "error", "code": "SLACK_EVENT_INVALID", "message": "Slack event payload is invalid" }
 ```
+
+Captured Slack history is stored in the `slack_messages` D1 table. The Think agent has a bounded `getSlackHistoryContext` tool for summarizing recent history by `thread`, `channel`, or `channel_with_threads`.
 
 Use `npm run typecheck`, `npm test`, and `npx wrangler deploy --dry-run` before deploying Worker changes.
 
