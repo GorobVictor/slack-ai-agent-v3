@@ -1,4 +1,4 @@
-import { Think } from "@cloudflare/think";
+import { Think, type SkillSource } from "@cloudflare/think";
 import { tool, type LanguageModel, type ToolSet, type UIMessage } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 import { z } from "zod";
@@ -7,6 +7,7 @@ import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-me
 import { BuildSlackHistoryContextUseCase } from "../slack/slack-history-summary.use-case.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import { buildSlackAgentSystemPrompt } from "./agent.prompts.js";
+import { slackAgentSkillSource } from "./agent.skills.js";
 import type {
   RunSlackTurnInput,
   RunSlackTurnResult,
@@ -27,6 +28,10 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
 
   override getSystemPrompt(): string {
     return buildSlackAgentSystemPrompt();
+  }
+
+  override getSkills(): SkillSource[] {
+    return [slackAgentSkillSource];
   }
 
   override getTools(): ToolSet {
