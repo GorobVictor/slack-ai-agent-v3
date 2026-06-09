@@ -19,11 +19,6 @@ export type NormalizedSlackMessageEvent = {
   processingIntent?: SlackProcessingIntent;
 };
 
-export type SlackReplyTarget = {
-  channelId: string;
-  threadTs: string;
-};
-
 export type WorkerSlackReplyResponse =
   | {
       status: "reply";

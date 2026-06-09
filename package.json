@@ -9,13 +9,11 @@
     "start": "node dist/cmd/listener/index.js",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "typecheck:worker": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "worker:deploy": "wrangler deploy",
     "worker:dev": "wrangler dev"
   },
   "dependencies": {
-    "@cloudflare/shell": "^0.3.9",
     "@cloudflare/think": "^0.8.8",
     "@slack/bolt": "^4.7.3",
     "agents": "^0.15.0",
