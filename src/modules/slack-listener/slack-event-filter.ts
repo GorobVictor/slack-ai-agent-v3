@@ -9,6 +9,7 @@ export function decideSlackEventHandling(input: SlackEventFilterInput): SlackEve
   if (eventType === "app_mention") {
     return {
       action: "forward",
+      processingIntent: "invoke",
       shouldTrackThread: true,
       reason: "app_mention",
     };
@@ -17,6 +18,7 @@ export function decideSlackEventHandling(input: SlackEventFilterInput): SlackEve
   if (eventType === "message.im") {
     return {
       action: "forward",
+      processingIntent: "invoke",
       shouldTrackThread: false,
       reason: "direct_message",
     };
@@ -25,12 +27,13 @@ export function decideSlackEventHandling(input: SlackEventFilterInput): SlackEve
   if (eventType === "message.mpim") {
     return {
       action: "forward",
+      processingIntent: event.isMention ? "invoke" : "capture",
       shouldTrackThread: event.isMention,
       reason: event.isMention
         ? "mpim_mention"
         : hasTrackedThread
-          ? "tracked_mpim_thread"
-          : "mpim_conversation",
+          ? "tracked_mpim_thread_capture"
+          : "mpim_capture",
     };
   }
 
@@ -38,6 +41,7 @@ export function decideSlackEventHandling(input: SlackEventFilterInput): SlackEve
     if (event.isMention) {
       return {
         action: "forward",
+        processingIntent: "invoke",
         shouldTrackThread: true,
         reason: "channel_mention",
       };
@@ -46,10 +50,18 @@ export function decideSlackEventHandling(input: SlackEventFilterInput): SlackEve
     if (event.isThreadMessage && hasTrackedThread) {
       return {
         action: "forward",
+        processingIntent: "capture",
         shouldTrackThread: false,
-        reason: "tracked_thread",
+        reason: "tracked_thread_capture",
       };
     }
+
+    return {
+      action: "forward",
+      processingIntent: "capture",
+      shouldTrackThread: false,
+      reason: event.isThreadMessage ? "thread_capture" : "channel_capture",
+    };
   }
 
   return {

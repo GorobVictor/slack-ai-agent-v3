@@ -1,7 +1,11 @@
 import { Think } from "@cloudflare/think";
-import type { LanguageModel, UIMessage } from "ai";
+import { tool, type LanguageModel, type ToolSet, type UIMessage } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
+import { z } from "zod";
 
+import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-message-history.adapter.js";
+import { BuildSlackHistoryContextUseCase } from "../slack/slack-history-summary.use-case.js";
+import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import { buildSlackAgentSystemPrompt } from "./agent.prompts.js";
 import type {
   RunSlackTurnInput,
@@ -13,6 +17,7 @@ const DEFAULT_WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
 export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
   override workspaceBash = false;
+  private activeSlackEvent: SlackWorkerRequest | null = null;
 
   override getModel(): LanguageModel {
     return createWorkersAI({ binding: this.env.AI })(
@@ -22,6 +27,47 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
 
   override getSystemPrompt(): string {
     return buildSlackAgentSystemPrompt();
+  }
+
+  override getTools(): ToolSet {
+    return {
+      getSlackHistoryContext: tool({
+        description:
+          "Read captured Slack history for summarization. Use this before summarizing a thread, channel, or channel with threads.",
+        inputSchema: z.object({
+          scope: z
+            .enum(["thread", "channel", "channel_with_threads"])
+            .describe("The Slack history scope to read."),
+          days: z
+            .number()
+            .int()
+            .min(1)
+            .max(30)
+            .describe("How many days of recent captured history to include."),
+          threadTs: z
+            .string()
+            .min(1)
+            .optional()
+            .describe("Thread timestamp for thread summaries. Defaults to the current thread."),
+        }),
+        execute: async (input) => {
+          if (!this.activeSlackEvent) {
+            return "Slack history context is only available while processing a Slack message.";
+          }
+
+          const useCase = new BuildSlackHistoryContextUseCase(
+            new D1SlackMessageHistoryAdapter(this.env.SLACK_HISTORY_DB),
+          );
+
+          return useCase.execute({
+            currentEvent: this.activeSlackEvent,
+            scope: input.scope,
+            days: input.days,
+            threadTs: input.threadTs,
+          });
+        },
+      }),
+    };
   }
 
   async runSlackTurn(input: RunSlackTurnInput): Promise<RunSlackTurnResult> {
@@ -34,13 +80,20 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
     }
 
     const beforeMessageIds = new Set(this.messages.map((message) => message.id));
-    const result = await this.saveMessages([
-      {
-        id: `slack-${input.event.idempotencyKey}`,
-        role: "user",
-        parts: [{ type: "text", text: formatSlackUserMessage(input) }],
-      },
-    ]);
+    this.activeSlackEvent = input.event;
+    const result = await (async () => {
+      try {
+        return await this.saveMessages([
+          {
+            id: `slack-${input.event.idempotencyKey}`,
+            role: "user",
+            parts: [{ type: "text", text: formatSlackUserMessage(input) }],
+          },
+        ]);
+      } finally {
+        this.activeSlackEvent = null;
+      }
+    })();
 
     if (result.status !== "completed") {
       throw new Error(`Think turn did not complete: ${result.status}`);

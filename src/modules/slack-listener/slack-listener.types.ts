@@ -1,9 +1,10 @@
 import type {
   NormalizedSlackMessageEvent,
   SlackChannelType,
+  SlackProcessingIntent,
 } from "../slack/slack.types.js";
 
-export type { NormalizedSlackMessageEvent, SlackChannelType };
+export type { NormalizedSlackMessageEvent, SlackChannelType, SlackProcessingIntent };
 
 export type SlackEventKind =
   | "app_mention"
@@ -37,11 +38,13 @@ export type SlackEventFilterInput = {
 export type SlackEventFilterDecision =
   | {
       action: "forward";
+      processingIntent: SlackProcessingIntent;
       shouldTrackThread: boolean;
       reason: string;
     }
   | {
       action: "ignore";
+      processingIntent?: never;
       shouldTrackThread: false;
       reason: string;
     };

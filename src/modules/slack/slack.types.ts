@@ -1,4 +1,5 @@
 export type SlackChannelType = "im" | "channel" | "group" | "mpim" | string;
+export type SlackProcessingIntent = "capture" | "invoke";
 
 export type NormalizedSlackMessageEvent = {
   source: "slack";
@@ -15,6 +16,7 @@ export type NormalizedSlackMessageEvent = {
   isMention: boolean;
   isThreadMessage: boolean;
   idempotencyKey: string;
+  processingIntent?: SlackProcessingIntent;
 };
 
 export type SlackReplyTarget = {
@@ -38,4 +40,6 @@ export type WorkerSlackReplyResponse =
       message: string;
     };
 
-export type SlackWorkerRequest = NormalizedSlackMessageEvent;
+export type SlackWorkerRequest = NormalizedSlackMessageEvent & {
+  processingIntent: SlackProcessingIntent;
+};

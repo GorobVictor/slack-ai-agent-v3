@@ -1,8 +1,8 @@
-import type { NormalizedSlackMessageEvent } from "../modules/slack/slack.types.js";
+import type { SlackWorkerRequest } from "../modules/slack/slack.types.js";
 
 export type SubmitSlackMessageToThinkInput = {
   sessionId: string;
-  event: NormalizedSlackMessageEvent;
+  event: SlackWorkerRequest;
 };
 
 export type ThinkSessionReply = {

@@ -107,7 +107,7 @@ function resolveEventType(event: SlackEventRecord): SlackEventKind | null {
     return null;
   }
 
-  return `message.${channelType}` as SlackEventKind;
+  return toSlackEventKind(channelType);
 }
 
 function shouldIgnoreEvent(event: SlackEventRecord, botUserId: string): boolean {
@@ -154,6 +154,21 @@ function resolveChannelType(event: SlackEventRecord): SlackChannelType | undefin
   }
 
   return undefined;
+}
+
+function toSlackEventKind(channelType: SlackChannelType): SlackEventKind {
+  switch (channelType) {
+    case "channel":
+      return "message.channels";
+    case "group":
+      return "message.groups";
+    case "im":
+      return "message.im";
+    case "mpim":
+      return "message.mpim";
+    default:
+      return `message.${channelType}` as SlackEventKind;
+  }
 }
 
 function isRecord(value: unknown): value is SlackEventRecord {

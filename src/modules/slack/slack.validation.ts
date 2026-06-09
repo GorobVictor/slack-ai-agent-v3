@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import type {
-  NormalizedSlackMessageEvent,
+  SlackWorkerRequest,
   WorkerSlackReplyResponse,
 } from "./slack.types.js";
 
@@ -20,6 +20,7 @@ const normalizedSlackMessageEventSchema = z.object({
   isMention: z.boolean(),
   isThreadMessage: z.boolean(),
   idempotencyKey: z.string().min(1),
+  processingIntent: z.enum(["capture", "invoke"]),
 });
 
 const workerSlackReplyResponseSchema = z.discriminatedUnion("status", [
@@ -41,7 +42,7 @@ const workerSlackReplyResponseSchema = z.discriminatedUnion("status", [
 
 export function parseNormalizedSlackMessageEvent(
   value: unknown,
-): NormalizedSlackMessageEvent | null {
+): SlackWorkerRequest | null {
   const result = normalizedSlackMessageEventSchema.safeParse(value);
   return result.success ? result.data : null;
 }

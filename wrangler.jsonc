@@ -10,6 +10,14 @@
   "vars": {
     "AI_MODEL": "@cf/google/gemma-4-26b-a4b-it"
   },
+  "d1_databases": [
+    {
+      "binding": "SLACK_HISTORY_DB",
+      "database_name": "slack-ai-agent-v3-history",
+      "database_id": "df9ba747-cfe8-4bc5-9b80-ddf601d76c7c",
+      "migrations_dir": "migrations"
+    }
+  ],
   "durable_objects": {
     "bindings": [
       {

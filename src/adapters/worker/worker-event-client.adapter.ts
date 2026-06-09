@@ -2,7 +2,7 @@ import type { WorkerEventClientPort } from "../../ports/worker-event-client.port
 import { AppError } from "../../shared/errors.js";
 import { retry } from "../../tools/retry.tool.js";
 import type {
-  NormalizedSlackMessageEvent,
+  SlackWorkerRequest,
   WorkerSlackReplyResponse,
 } from "../../modules/slack/slack.types.js";
 import { parseWorkerSlackReplyResponse } from "../../modules/slack/slack.validation.js";
@@ -16,7 +16,7 @@ export class WorkerEventClientAdapter implements WorkerEventClientPort {
   constructor(private readonly options: WorkerEventClientAdapterOptions) {}
 
   async sendSlackMessageEvent(
-    event: NormalizedSlackMessageEvent,
+    event: SlackWorkerRequest,
   ): Promise<WorkerSlackReplyResponse> {
     return retry(
       async () => {

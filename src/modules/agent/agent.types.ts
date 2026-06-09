@@ -1,12 +1,13 @@
-import type { NormalizedSlackMessageEvent } from "../slack/slack.types.js";
+import type { SlackWorkerRequest } from "../slack/slack.types.js";
 
 export type SlackThinkAgentEnv = {
   AI: Ai;
   AI_MODEL?: string;
+  SLACK_HISTORY_DB: D1Database;
 };
 
 export type RunSlackTurnInput = {
-  event: NormalizedSlackMessageEvent;
+  event: SlackWorkerRequest;
 };
 
 export type RunSlackTurnResult = {

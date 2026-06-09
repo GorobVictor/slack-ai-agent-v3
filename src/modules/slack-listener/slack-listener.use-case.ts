@@ -57,7 +57,11 @@ export class SlackListenerUseCase {
         await this.threadTracker.addThread(threadReference);
       }
 
-      const workerReply = await this.workerClient.sendSlackMessageEvent(event);
+      const workerEvent = {
+        ...event,
+        processingIntent: decision.processingIntent,
+      };
+      const workerReply = await this.workerClient.sendSlackMessageEvent(workerEvent);
 
       if (workerReply.status === "reply") {
         await this.slackMessenger.sendMessage({
@@ -70,6 +74,7 @@ export class SlackListenerUseCase {
       this.logger.info("Forwarded Slack event to Worker", {
         ...safeMetadata,
         reason: decision.reason,
+        processingIntent: decision.processingIntent,
         workerReplyStatus: workerReply.status,
         trackedThread: decision.shouldTrackThread,
       });
