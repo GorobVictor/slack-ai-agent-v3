@@ -6,11 +6,16 @@ This repository uses Cursor rules and skills to guide agent work. The primary pr
 
 - Use feature-first modular hexagonal architecture for Worker code.
 - Keep the Node.js Slack listener thin and separate from Worker business logic.
+- The Slack listener entrypoint is `src/cmd/listener/index.ts`; run it with `npm run listener:slack`.
 - Use `@cloudflare/think` as the default runtime for AI agent behavior.
 - Keep Cloudflare bindings, Slack API calls, storage, and other external services behind ports and adapters.
 - Write repository content in English.
 - Save approved Plan Mode plans under `proto/features/`.
 - Do not commit `checkpoint.md`, secrets, or local artifacts such as `.DS_Store`.
+
+## Verification
+
+Run `npm run typecheck` and `npm test` before committing TypeScript listener changes.
 
 ## Commit Workflow
 
