@@ -22,6 +22,12 @@ Run it locally with:
 npm run listener:slack
 ```
 
+Create a local `.env` from the committed template:
+
+```sh
+cp .env.example .env
+```
+
 Required environment variables:
 
 ```txt
