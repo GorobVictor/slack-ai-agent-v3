@@ -43,12 +43,27 @@ describe("SlackListenerUseCase", () => {
       },
     ]);
     expect(workerEvents[0]?.processingIntent).toBe("invoke");
+    expect(workerEvents[1]).toMatchObject({
+      source: "slack",
+      teamId: "T123",
+      channelId: "C123",
+      userId: BOT_USER_ID,
+      text: "Hello from Think",
+      messageTs: "1710000000.000999",
+      threadTs: "1710000000.000100",
+      channelType: "channel",
+      isMention: false,
+      isThreadMessage: true,
+      idempotencyKey: "slack:T123:C123:1710000000.000999",
+      processingIntent: "capture",
+    });
   });
 
   it("does not post Slack messages for no_reply responses", async () => {
     const sentMessages: Array<{ channelId: string; threadTs: string; text: string }> = [];
+    const workerEvents: SlackWorkerRequest[] = [];
     const useCase = new SlackListenerUseCase(
-      workerClient({ status: "no_reply" }),
+      workerClient({ status: "no_reply" }, workerEvents),
       messenger(sentMessages),
       trackedThreads(),
       logger,
@@ -68,6 +83,7 @@ describe("SlackListenerUseCase", () => {
     });
 
     expect(sentMessages).toEqual([]);
+    expect(workerEvents).toHaveLength(1);
   });
 
   it("forwards unmentioned channel messages as capture-only", async () => {
@@ -118,6 +134,9 @@ function messenger(
   return {
     async sendMessage(input) {
       sentMessages.push(input);
+      return {
+        messageTs: "1710000000.000999",
+      };
     },
   };
 }
