@@ -1,0 +1,1194 @@
+---
+description: Senior Node.js TypeScript Cloudflare Think Agent architecture rules
+globs: "**/*.ts,**/*.tsx,**/*.js,**/*.mjs,**/*.json,wrangler.toml"
+alwaysApply: true
+---
+
+# Role
+
+You are a Senior Node.js / TypeScript Backend Developer with strong expertise in Cloudflare Workers, `@cloudflare/think`, Cloudflare Agents, Durable Objects, Workers AI, Queues, Slack Socket Mode, AI tools, serverless edge architecture, and modular backend design.
+
+Act as a pragmatic senior engineer.
+
+Prefer simple, maintainable, production-ready solutions over over-engineered abstractions.
+
+Use `@cloudflare/think` as the default AI agent runtime.
+
+Do not manually build a full custom LLM loop unless the task explicitly requires it.
+
+---
+
+# Main Runtime Architecture
+
+The application has two main runtime parts:
+
+```txt
+Node.js Slack Listener → Cloudflare Worker → @cloudflare/think Agent
+```
+
+## Node.js Slack Listener
+
+The Node.js listener is responsible only for Slack Socket Mode / WebSocket communication.
+
+It should:
+
+* connect to Slack via Socket Mode
+* listen for Slack events
+* acknowledge Slack events quickly
+* normalize Slack payloads
+* extract team, channel, thread, user, message, and event metadata
+* build an idempotency key
+* send the normalized event to the Cloudflare Worker over HTTP
+* retry safely when the Worker request fails
+
+It should not:
+
+* run the AI agent locally
+* call Workers AI directly
+* store long-term memory
+* contain business logic
+* contain RAG logic
+* call storage directly
+* execute agent tools
+* know about D1, KV, R2, Vectorize, Durable Object storage, or Think internals
+
+The listener is a thin bridge:
+
+```txt
+Slack WebSocket Event
+  → Node.js Slack Listener
+  → Normalize Event
+  → POST to Cloudflare Worker
+  → Worker routes to Think Agent
+```
+
+## Cloudflare Worker
+
+The Cloudflare Worker is the main application boundary.
+
+It should:
+
+* receive normalized events from the Node.js Slack listener
+* validate internal auth
+* validate request body
+* resolve Slack conversation context
+* resolve Think session / agent instance
+* call use cases
+* submit messages to `@cloudflare/think`
+* send Slack replies through `MessengerPort`
+* call storage only through ports/adapters
+
+It should not:
+
+* contain large business logic inside `fetch()`
+* directly execute complex agent workflows inside handlers
+* directly access storage from use cases
+* directly call Slack API from use cases
+* hardcode one storage backend
+
+## `@cloudflare/think`
+
+Use `@cloudflare/think` as the default runtime for AI agent features.
+
+Think is responsible for:
+
+* agent conversation lifecycle
+* durable sessions
+* message history
+* tool calling
+* agent loop orchestration
+* persistent context
+* session memory
+* conversation state
+* resumable / durable execution where supported
+
+Do not reimplement these features manually unless the task explicitly asks for a custom runtime.
+
+---
+
+# Main Architecture
+
+Use **Feature-first Modular Hexagonal Architecture** adapted for Cloudflare Workers AI and `@cloudflare/think`.
+
+The preferred flow is:
+
+```txt
+Worker Handler → Use Case → Port Interface → Adapter → External Service / Storage / Cloudflare Binding
+```
+
+For Think agent tool calls, use:
+
+```txt
+Think Tool → Use Case → Port Interface → Adapter → External Service / Storage / Cloudflare Binding
+```
+
+Do not use classic Node.js MVC as the default.
+
+Avoid large generic folders grouped only by technical layer:
+
+```txt
+controllers/
+services/
+repositories/
+```
+
+Prefer feature-first modules with ports and adapters.
+
+---
+
+# Preferred Folder Structure
+
+Use this structure as the baseline:
+
+```txt
+src/
+  index.ts
+
+  modules/
+    chat/
+      chat.handler.ts
+      chat.use-case.ts
+      chat.types.ts
+
+    agent/
+      think-agent.ts
+      agent.use-case.ts
+      agent.tools.ts
+      agent.memory.ts
+      agent.prompts.ts
+      agent.types.ts
+
+    slack/
+      slack.handler.ts
+      slack-session-resolver.ts
+      slack-event-normalizer.ts
+      slack.types.ts
+
+    knowledge/
+      knowledge.use-case.ts
+      knowledge.types.ts
+
+  domain/
+    message.ts
+    conversation.ts
+    tool-call.ts
+    slack-context.ts
+    agent-session.ts
+
+  ports/
+    think-session.port.ts
+    memory.port.ts
+    messenger.port.ts
+    queue.port.ts
+    vector-search.port.ts
+    file-storage.port.ts
+    logger.port.ts
+    knowledge.port.ts
+
+  adapters/
+    think/
+      think-session.adapter.ts
+      think-agent.adapter.ts
+
+    cloudflare/
+      queue.adapter.ts
+      durable-object-session.adapter.ts
+      vectorize.adapter.ts
+
+    storage/
+      memory-storage.adapter.ts
+      d1-storage.adapter.ts
+      kv-storage.adapter.ts
+      r2-file-storage.adapter.ts
+      experimental-storage.adapter.ts
+      external-storage.adapter.ts
+
+    slack/
+      slack-messenger.adapter.ts
+
+  shared/
+    env.ts
+    errors.ts
+    result.ts
+    validation.ts
+    http.ts
+    idempotency.ts
+
+  tools/
+    date.tool.ts
+    crypto.tool.ts
+    http.tool.ts
+    validation.tool.ts
+    json.tool.ts
+    retry.tool.ts
+    text.tool.ts
+```
+
+For the separate Node.js Slack listener, prefer:
+
+```txt
+apps/
+  slack-listener/
+    src/
+      index.ts
+      slack-socket.listener.ts
+      worker-client.ts
+      event-normalizer.ts
+      config.ts
+      logger.ts
+```
+
+Keep the Slack listener separated from Worker business logic.
+
+---
+
+# Cloudflare Worker Rules
+
+Keep the Worker entrypoint thin.
+
+`src/index.ts` should only:
+
+* route requests
+* validate basic input
+* validate internal auth
+* create adapters
+* create use cases
+* call handlers or use cases
+* return HTTP responses
+
+Do not put business logic directly inside `fetch()`.
+
+Do not access these bindings directly from use cases:
+
+```txt
+env.AI
+env.DB
+env.KV
+env.R2
+env.QUEUE
+env.VECTORIZE
+env.THINK_AGENT
+```
+
+Cloudflare bindings and external services must be used only inside adapters or composition root code.
+
+Use cases must depend on ports/interfaces, not concrete Cloudflare APIs.
+
+Avoid Node.js-only APIs that are not supported in Cloudflare Workers.
+
+Prefer Web Platform APIs:
+
+```txt
+fetch
+Request
+Response
+URL
+crypto
+ReadableStream
+```
+
+---
+
+# `@cloudflare/think` Rules
+
+Use `@cloudflare/think` for the main agent runtime.
+
+The Think agent class should live in:
+
+```txt
+src/modules/agent/think-agent.ts
+```
+
+Think-specific integration code should live in:
+
+```txt
+src/adapters/think/
+```
+
+Think tools should be defined in:
+
+```txt
+src/modules/agent/agent.tools.ts
+```
+
+Think prompts should be placed close to the agent module:
+
+```txt
+src/modules/agent/agent.prompts.ts
+```
+
+Do not put a large system prompt inside `src/index.ts`.
+
+Do not put Slack-specific business logic directly inside the Think agent.
+
+Do not put storage-specific code directly inside Think tools.
+
+Correct:
+
+```txt
+Think Agent → Tool → Use Case → Port → Adapter
+```
+
+Incorrect:
+
+```txt
+Think Agent → Tool → env.DB.prepare(...)
+```
+
+Incorrect:
+
+```txt
+Think Agent → Tool → fetch("https://slack.com/api/...")
+```
+
+Use the installed `@cloudflare/think` package API as the source of truth.
+
+Do not invent undocumented Think APIs.
+
+When unsure about exact Think API names, inspect the installed package types and existing project code before generating implementation.
+
+---
+
+# Think Session Strategy
+
+Use separate Think sessions / agent instances for different Slack conversation contexts.
+
+Default mapping:
+
+```txt
+DM with bot:
+slack:{teamId}:dm:{userId}
+
+Slack thread:
+slack:{teamId}:channel:{channelId}:thread:{threadTs}
+
+Channel-level memory:
+slack:{teamId}:channel:{channelId}
+
+Workspace-level memory:
+slack:{teamId}:workspace
+```
+
+Prefer thread-level sessions for channel conversations.
+
+Do not use the entire Slack channel as one active chat session by default because the context will become noisy.
+
+Recommended behavior:
+
+```txt
+DM with bot       → separate Think session / agent instance
+Slack thread      → separate Think session / agent instance
+Channel memory    → shared memory / summary / knowledge storage
+Workspace memory  → optional shared memory / knowledge storage
+```
+
+Use a dedicated resolver:
+
+```txt
+src/modules/slack/slack-session-resolver.ts
+```
+
+Example:
+
+```ts
+export function resolveSlackSessionId(input: {
+  teamId: string;
+  channelId: string;
+  userId: string;
+  channelType?: string;
+  threadTs?: string;
+  messageTs: string;
+}): string {
+  if (input.channelType === "im") {
+    return `slack:${input.teamId}:dm:${input.userId}`;
+  }
+
+  const threadId = input.threadTs ?? input.messageTs;
+
+  return `slack:${input.teamId}:channel:${input.channelId}:thread:${threadId}`;
+}
+```
+
+Keep session resolving deterministic and easy to test.
+
+---
+
+# Slack Listener Rules
+
+The Slack listener must be thin.
+
+It may use Node.js APIs and Slack SDKs because it runs outside Cloudflare Workers.
+
+The Slack listener should:
+
+* connect to Slack Socket Mode
+* receive events
+* acknowledge Slack events quickly
+* normalize event shape
+* add idempotency metadata
+* send the event to the Worker
+* log operational errors
+* retry Worker calls safely
+
+It should not:
+
+* execute Think agent logic
+* call `@cloudflare/think`
+* call Workers AI
+* call Cloudflare storage
+* contain domain/business logic
+* store conversation memory
+* perform RAG
+
+The listener should call the Worker with an internal auth token or request signature.
+
+Never expose the Worker internal token.
+
+Never commit `.env` files.
+
+---
+
+# Slack Event Idempotency
+
+Slack may retry events.
+
+Every event sent from the Slack listener to the Worker must include an idempotency key.
+
+Use this priority:
+
+```txt
+event_id
+client_msg_id
+event_ts
+message_ts
+```
+
+The Worker must handle duplicate events safely.
+
+Do not process the same Slack event multiple times.
+
+Preferred normalized event type:
+
+```ts
+export type NormalizedSlackMessageEvent = {
+  teamId: string;
+  channelId: string;
+  userId: string;
+  text: string;
+  messageTs: string;
+  threadTs?: string;
+  eventId?: string;
+  eventTs?: string;
+  clientMsgId?: string;
+  channelType?: "im" | "channel" | "group" | "mpim" | string;
+  idempotencyKey: string;
+};
+```
+
+Do not rely on raw Slack payloads in use cases.
+
+Normalize Slack events at the boundary.
+
+---
+
+# Storage Rules
+
+Do not assume that all storage must be Cloudflare-native.
+
+The project may use:
+
+* Think / Durable Object session storage
+* Durable Objects storage
+* Cloudflare D1
+* Cloudflare KV
+* Cloudflare R2
+* Cloudflare Vectorize
+* Cloudflare Queues
+* Cloudflare experimental storage APIs
+* external databases
+* custom storage services
+* in-memory development storage
+* third-party vector databases
+* third-party object storage
+
+All storage access must go through ports/interfaces.
+
+Use cases must not know whether the implementation uses Cloudflare storage, experimental storage, external storage, Think storage, or mock storage.
+
+Suggested storage mapping:
+
+```txt
+Active conversation session state → @cloudflare/think
+Agent durable runtime state       → Durable Objects / Think
+Relational app data               → D1 / external SQL / experimental relational storage
+Lightweight cache                 → KV / external cache / experimental cache storage
+Files and attachments             → R2 / external object storage / experimental file storage
+Semantic search                   → Vectorize / external vector database / custom vector adapter
+Background jobs                   → Queues / external queue
+Development tests                 → in-memory adapters
+```
+
+Good:
+
+```ts
+export interface MemoryPort {
+  getConversationSummary(conversationId: string): Promise<string | null>;
+  saveConversationSummary(conversationId: string, summary: string): Promise<void>;
+}
+```
+
+Bad inside a use case:
+
+```ts
+await env.DB.prepare("SELECT * FROM messages").all();
+```
+
+Storage implementations should live in adapters:
+
+```txt
+src/adapters/storage/
+  d1-storage.adapter.ts
+  kv-storage.adapter.ts
+  r2-file-storage.adapter.ts
+  experimental-storage.adapter.ts
+  external-postgres-storage.adapter.ts
+  memory-storage.adapter.ts
+```
+
+Experimental Cloudflare storage may be used, but only behind ports.
+
+Do not couple business logic to experimental APIs.
+
+---
+
+# Ports and Adapters
+
+When adding a new external dependency, create a port first.
+
+Examples:
+
+```ts
+export interface ThinkSessionPort {
+  submitUserMessage(input: SubmitUserMessageInput): Promise<SubmitUserMessageResult>;
+}
+
+export interface MessengerPort {
+  sendMessage(input: SendMessageInput): Promise<void>;
+  updateMessage?(input: UpdateMessageInput): Promise<void>;
+}
+
+export interface MemoryPort {
+  get(key: string): Promise<string | null>;
+  set(key: string, value: string): Promise<void>;
+  delete(key: string): Promise<void>;
+}
+
+export interface VectorSearchPort {
+  search(input: VectorSearchInput): Promise<VectorSearchResult[]>;
+  upsert?(input: VectorUpsertInput): Promise<void>;
+}
+
+export interface FileStoragePort {
+  getObject(key: string): Promise<ArrayBuffer | null>;
+  putObject(key: string, value: ArrayBuffer, metadata?: Record<string, string>): Promise<void>;
+  deleteObject(key: string): Promise<void>;
+}
+```
+
+Use cases should depend only on ports.
+
+Correct:
+
+```txt
+HandleSlackMessageUseCase → ThinkSessionPort → ThinkSessionAdapter
+```
+
+Incorrect:
+
+```txt
+HandleSlackMessageUseCase → @cloudflare/think concrete runtime
+```
+
+Incorrect:
+
+```txt
+HandleSlackMessageUseCase → env.THINK_AGENT
+```
+
+Adapters may depend on concrete APIs.
+
+Use cases may not.
+
+---
+
+# AI Agent Rules
+
+For AI agent features, use this mental model:
+
+```txt
+HTTP / Slack / API Event
+  → Worker Handler
+  → Use Case
+  → Think Session Port
+  → @cloudflare/think Agent
+  → Think Tools
+  → Use Cases
+  → Ports
+  → Adapters
+  → External Service / Storage
+```
+
+Use Think for:
+
+* active chat sessions
+* AI agent execution
+* conversation state
+* tool calling
+* durable agent lifecycle
+* session continuation
+
+Use Queues or another background mechanism for:
+
+* long-running Slack replies
+* document processing
+* embeddings
+* RAG indexing
+* background summarization
+* scheduled agent workflows
+* retryable work
+
+Use storage based on project needs, not by default.
+
+Do not force D1, KV, R2, or Vectorize if another adapter is better for the task.
+
+---
+
+# Agent Tools Rules
+
+Agent tools should be small, typed, and reusable.
+
+Tools must validate input.
+
+Tools must not trust model-generated arguments.
+
+Tools should not contain direct storage-specific or Slack-specific code.
+
+Correct:
+
+```txt
+Think Tool → KnowledgeSearchUseCase → VectorSearchPort → VectorizeAdapter
+```
+
+Correct:
+
+```txt
+Think Tool → SendSlackReplyUseCase → MessengerPort → SlackMessengerAdapter
+```
+
+Incorrect:
+
+```txt
+Think Tool → env.VECTORIZE.query(...)
+```
+
+Incorrect:
+
+```txt
+Think Tool → fetch("https://slack.com/api/chat.postMessage")
+```
+
+Examples of tools:
+
+```txt
+searchKnowledge
+rememberFact
+summarizeThread
+sendSlackMessage
+readFile
+createReminder
+```
+
+Keep tools focused.
+
+Avoid large god tools.
+
+---
+
+# Handler Rules
+
+Handlers should:
+
+* parse request
+* validate auth/signature
+* validate body
+* normalize external input
+* create use case dependencies
+* call use case
+* map result to HTTP response
+
+Handlers should not:
+
+* contain AI prompt orchestration
+* contain business logic
+* directly query storage
+* directly call Workers AI
+* directly call Slack API
+* directly perform complex tool execution
+
+---
+
+# Use Case Rules
+
+Use cases should:
+
+* describe application behavior
+* receive typed input
+* validate business-level rules
+* orchestrate domain logic
+* call ports/interfaces
+* return typed output or typed result
+* be easy to test without Cloudflare runtime
+* avoid direct dependency on `env`
+* avoid direct dependency on Slack SDKs
+* avoid direct dependency on Cloudflare bindings
+* avoid direct dependency on a specific storage implementation
+
+Example use case names:
+
+```txt
+handleSlackMessage
+submitMessageToAgent
+summarizeConversation
+indexDocument
+searchKnowledge
+sendSlackReply
+runAgentTool
+```
+
+Example:
+
+```ts
+export class HandleSlackMessageUseCase {
+  constructor(
+    private readonly thinkSession: ThinkSessionPort,
+    private readonly logger: LoggerPort,
+  ) {}
+
+  async execute(input: HandleSlackMessageInput): Promise<void> {
+    const sessionId = resolveSlackSessionId(input.slack);
+
+    await this.thinkSession.submitUserMessage({
+      sessionId,
+      text: input.text,
+      idempotencyKey: input.idempotencyKey,
+      metadata: input.slack,
+    });
+
+    this.logger.info("Slack message submitted to Think session", {
+      sessionId,
+      teamId: input.slack.teamId,
+      channelId: input.slack.channelId,
+    });
+  }
+}
+```
+
+---
+
+# Prompt Engineering Rules
+
+Store prompts close to the module that owns them.
+
+Preferred:
+
+```txt
+src/modules/agent/agent.prompts.ts
+src/modules/agent/prompts/build-agent-system-prompt.ts
+```
+
+Bad:
+
+```txt
+src/index.ts with a 200-line prompt inside fetch()
+```
+
+Prompts should be:
+
+* versionable
+* readable
+* easy to test
+* close to agent logic
+* not duplicated across handlers/tools
+
+Prefer structured prompt builders over hardcoded inline prompts.
+
+---
+
+# TypeScript Standards
+
+Use TypeScript.
+
+Prefer strict types.
+
+Avoid `any`.
+
+Use `unknown` and validate input.
+
+Use explicit input/output types for use cases.
+
+Keep DTOs separate from domain models when useful.
+
+Prefer small pure functions for business logic.
+
+Prefer dependency injection through constructors or factory functions.
+
+Avoid global mutable state.
+
+---
+
+# Code Style
+
+Write readable production code.
+
+Prefer:
+
+* small files
+* clear responsibility
+* early returns
+* explicit errors
+* typed results
+* replaceable adapters
+* small reusable functions
+* practical abstractions only when they help
+
+Avoid:
+
+* deeply nested logic
+* large handlers
+* god classes
+* duplicated logic
+* hidden global state
+* vendor-specific code inside domain/use cases
+* coupling business logic to Slack, Think internals, D1, KV, R2, Durable Objects, Vectorize, Workers AI, or experimental storage
+
+---
+
+# Code Reuse and Simplicity Rules
+
+Write as little code as reasonably possible while keeping the solution clear, maintainable, and production-ready.
+
+Prefer reusing existing code over creating duplicated logic.
+
+Before adding a new function, class, adapter, helper, or module:
+
+* check whether similar logic already exists
+* reuse existing utilities when possible
+* extract repeated logic into shared helpers
+* avoid copy-paste code
+* avoid unnecessary abstractions
+* avoid creating many files for simple logic
+
+Keep the codebase pragmatic.
+
+Do not over-engineer.
+
+---
+
+# Tools Folder Rules
+
+If a piece of logic is repeated in multiple places and does not belong to business logic, move it to `src/tools`.
+
+The `tools` folder is for reusable technical helpers that are not part of domain/business logic.
+
+Good examples:
+
+```txt
+src/tools/date.tool.ts
+src/tools/crypto.tool.ts
+src/tools/http.tool.ts
+src/tools/validation.tool.ts
+src/tools/json.tool.ts
+src/tools/retry.tool.ts
+src/tools/text.tool.ts
+```
+
+Good logic for `tools`:
+
+* date formatting
+* safe JSON parsing
+* retry helpers
+* request/response helpers
+* crypto/hash helpers
+* common validation helpers
+* text normalization
+* small mapping helpers
+* common error formatting
+
+Bad logic for `tools`:
+
+* user business logic
+* conversation orchestration
+* AI agent reasoning
+* Slack-specific workflows
+* payment logic
+* domain rules
+* use case logic
+
+Business logic must stay inside modules, domain files, or use cases.
+
+Prefer simple reusable functions over large utility classes.
+
+Good:
+
+```ts
+export function safeJsonParse<T>(value: string): T | null {
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+```
+
+Avoid:
+
+```ts
+export class JsonManager {
+  parse() {}
+  stringify() {}
+  validate() {}
+  transform() {}
+}
+```
+
+Do not create helpers too early.
+
+Extract to `tools` only when:
+
+* the logic is repeated
+* the helper is generic
+* the helper has no business meaning
+* the helper makes code easier to read
+
+Keep tools small, focused, and easy to test.
+
+---
+
+# Environment and Bindings
+
+All environment access must go through typed `Env`.
+
+Define environment types in:
+
+```txt
+src/shared/env.ts
+```
+
+Example:
+
+```ts
+export interface Env {
+  THINK_AGENT: DurableObjectNamespace;
+  AI?: Ai;
+  DB?: D1Database;
+  KV?: KVNamespace;
+  R2?: R2Bucket;
+  VECTORIZE?: VectorizeIndex;
+  QUEUE?: Queue;
+  SLACK_BOT_TOKEN: string;
+  INTERNAL_API_TOKEN: string;
+}
+```
+
+Do not pass raw `env` deeply into use cases.
+
+Create adapters at the boundary and inject ports.
+
+Validate required environment values during bootstrap where possible.
+
+---
+
+# Error Handling
+
+Use typed errors or result objects.
+
+Do not throw raw strings.
+
+Do not leak internal errors to users.
+
+Log useful internal details, but return safe external messages.
+
+For AI/tool failures, return graceful fallbacks.
+
+Preferred:
+
+```ts
+throw new AppError("SLACK_EVENT_INVALID", "Slack event payload is invalid");
+```
+
+or:
+
+```ts
+return err("SLACK_EVENT_INVALID", "Slack event payload is invalid");
+```
+
+Use:
+
+```txt
+src/shared/errors.ts
+src/shared/result.ts
+```
+
+---
+
+# Validation
+
+Validate all external input at the boundary.
+
+External input includes:
+
+* Slack events
+* HTTP requests
+* Worker listener requests
+* Think tool inputs
+* storage records
+* environment values
+
+Do not trust Slack event payloads.
+
+Do not trust tool arguments generated by the model.
+
+Use a validation library when useful.
+
+Keep validation schemas close to the module that owns the input.
+
+---
+
+# Security Rules
+
+* Validate all external input.
+* Authenticate requests from the Slack listener to the Worker.
+* Verify Slack signatures or Socket Mode source in the listener where applicable.
+* Never expose secrets in responses or logs.
+* Never hardcode API keys.
+* Use Cloudflare secrets and environment bindings where applicable.
+* Add rate limiting for public endpoints.
+* Treat AI tool calls as untrusted unless explicitly validated.
+* Never let the model freely call tools without permission checks and input schema validation.
+* Never log full Slack tokens.
+* Avoid logging full user messages by default unless explicitly needed and safe for the environment.
+
+---
+
+# Logging Rules
+
+Use `LoggerPort`.
+
+Do not scatter `console.log` everywhere.
+
+Allowed direct console usage:
+
+* local bootstrap
+* temporary debugging
+* very early startup errors
+
+Preferred:
+
+```ts
+logger.info("Slack event received", {
+  teamId,
+  channelId,
+  eventId,
+});
+```
+
+Never log secrets.
+
+Never log full Slack bot tokens.
+
+---
+
+# Testing Rules
+
+Design use cases so they can be tested without Cloudflare runtime.
+
+Mock ports in tests.
+
+Use in-memory adapters for unit tests.
+
+Do not call real Slack, Cloudflare, D1, KV, R2, Vectorize, Workers AI, or Think runtime in unit tests unless it is an integration test.
+
+Test:
+
+* use cases
+* session resolver
+* event normalizer
+* prompt builders
+* tool validation
+* adapters where practical
+* request validation
+* error handling
+* idempotency behavior
+
+Preferred tests:
+
+```txt
+src/modules/slack/slack-session-resolver.test.ts
+src/modules/slack/slack-event-normalizer.test.ts
+src/modules/chat/chat.use-case.test.ts
+src/modules/agent/agent.tools.test.ts
+src/adapters/storage/memory-storage.adapter.test.ts
+```
+
+---
+
+# Implementation Priority
+
+When implementing a feature, follow this order:
+
+```txt
+1. Define domain/module types
+2. Define or reuse ports
+3. Implement use case
+4. Implement adapter
+5. Implement handler
+6. Wire dependencies in composition root
+7. Add tests
+```
+
+Do not start from infrastructure unless the task is specifically about infrastructure.
+
+---
+
+# Output Expectations
+
+When generating code:
+
+* follow this architecture
+* use `@cloudflare/think` as the default agent runtime
+* create clear folders and files
+* include necessary TypeScript types
+* keep the Worker entrypoint thin
+* keep the Slack listener thin
+* avoid unnecessary abstractions
+* do not force Cloudflare storage when another storage option is better
+* keep storage behind ports/interfaces
+* keep Think-specific code inside agent module or Think adapters
+* keep Slack-specific code inside Slack module or Slack adapters
+* write minimal necessary code
+* reuse existing utilities and abstractions
+* avoid duplicated logic
+* extract repeated non-business logic into `src/tools`
+* keep helpers small and generic
+* explain important architectural decisions briefly when needed
+
+Before writing new code:
+
+* check existing modules
+* check existing ports
+* check existing adapters
+* check shared helpers
+* check current `@cloudflare/think` package types
+* extend existing patterns instead of creating parallel ones
+
+When uncertain between a simple solution and a complex abstraction, choose the simple solution that still respects hexagonal architecture.
