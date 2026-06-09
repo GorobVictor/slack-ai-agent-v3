@@ -5,7 +5,7 @@ import { normalizeSlackMessageEvent } from "./slack-event-normalizer.js";
 const BOT_USER_ID = "UBOT";
 
 describe("normalizeSlackMessageEvent", () => {
-  it("normalizes app mentions and uses event_id as the idempotency key", () => {
+  it("normalizes app mentions and uses a stable message idempotency key", () => {
     const normalized = normalizeSlackMessageEvent(
       {
         body: {
@@ -33,7 +33,7 @@ describe("normalizeSlackMessageEvent", () => {
       channelType: "channel",
       isMention: true,
       isThreadMessage: false,
-      idempotencyKey: "Ev123",
+      idempotencyKey: "slack:T123:C123:1710000000.000100",
     });
     expect(normalized?.metadata.eventType).toBe("app_mention");
     expect(normalized?.metadata.threadId).toBe("1710000000.000100");
@@ -65,6 +65,45 @@ describe("normalizeSlackMessageEvent", () => {
       idempotencyKey: "client-123",
     });
     expect(normalized?.metadata.eventType).toBe("message.im");
+  });
+
+  it("uses the same idempotency key for app_mention and message events for the same Slack message", () => {
+    const appMention = normalizeSlackMessageEvent(
+      {
+        body: {
+          event_id: "Ev-app-mention",
+          team_id: "T123",
+        },
+        event: {
+          type: "app_mention",
+          channel: "G123",
+          user: "U123",
+          text: "<@UBOT> summarize",
+          ts: "1710000000.000300",
+        },
+      },
+      BOT_USER_ID,
+    );
+    const message = normalizeSlackMessageEvent(
+      {
+        body: {
+          event_id: "Ev-message",
+          team_id: "T123",
+        },
+        event: {
+          type: "message",
+          channel: "G123",
+          channel_type: "group",
+          user: "U123",
+          text: "<@UBOT> summarize",
+          ts: "1710000000.000300",
+        },
+      },
+      BOT_USER_ID,
+    );
+
+    expect(appMention?.event.idempotencyKey).toBe("slack:T123:G123:1710000000.000300");
+    expect(message?.event.idempotencyKey).toBe(appMention?.event.idempotencyKey);
   });
 
   it("maps Slack channel types to plural message event kinds", () => {
@@ -143,7 +182,7 @@ describe("normalizeSlackMessageEvent", () => {
       BOT_USER_ID,
     );
 
-    expect(normalized?.event.idempotencyKey).toBe("1710000000");
+    expect(normalized?.event.idempotencyKey).toBe("slack:T123:C123:1710000000.000100");
     expect(normalized?.metadata.hasFilesOrAttachments).toBe(true);
   });
 });

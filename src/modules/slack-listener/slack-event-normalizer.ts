@@ -47,8 +47,7 @@ export function normalizeSlackMessageEvent(
     return null;
   }
 
-  const idempotencyKey =
-    eventId ?? clientMsgId ?? eventTs ?? messageTs ?? `slack:${teamId}:${channelId}:${messageTs}`;
+  const idempotencyKey = clientMsgId ?? `slack:${teamId}:${channelId}:${messageTs}`;
 
   return {
     event: {

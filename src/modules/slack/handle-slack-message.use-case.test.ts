@@ -70,6 +70,26 @@ describe("HandleSlackMessageUseCase", () => {
       reason: "empty_agent_reply",
     });
   });
+
+  it("does not invoke Think for duplicate invoke events", async () => {
+    const calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [];
+    const useCase = new HandleSlackMessageUseCase(
+      {
+        async submitSlackMessage(input) {
+          calls.push(input);
+          return { text: "Should not be called" };
+        },
+      } satisfies ThinkSessionPort,
+      duplicateHistory(),
+      logger,
+    );
+
+    await expect(useCase.execute(event({ processingIntent: "invoke" }))).resolves.toEqual({
+      status: "no_reply",
+      reason: "duplicate_message",
+    });
+    expect(calls).toEqual([]);
+  });
 });
 
 const logger: LoggerPort = {
@@ -83,6 +103,23 @@ function history(saved: SlackWorkerRequest[]): SlackMessageHistoryPort {
     async saveMessage(event) {
       saved.push(event);
       return { status: "inserted" };
+    },
+    async findMessagesByChannelAndTimeRange() {
+      return [];
+    },
+    async findMessagesByThreadAndTimeRange() {
+      return [];
+    },
+    async findThreadMessagesByChannelAndTimeRange() {
+      return [];
+    },
+  };
+}
+
+function duplicateHistory(): SlackMessageHistoryPort {
+  return {
+    async saveMessage() {
+      return { status: "duplicate" };
     },
     async findMessagesByChannelAndTimeRange() {
       return [];

@@ -39,6 +39,13 @@ export class HandleSlackMessageUseCase {
       };
     }
 
+    if (saveResult.status === "duplicate") {
+      return {
+        status: "no_reply",
+        reason: "duplicate_message",
+      };
+    }
+
     this.logger.info("Submitting Slack message to Think session", {
       sessionId,
       teamId: event.teamId,
