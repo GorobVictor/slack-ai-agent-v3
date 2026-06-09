@@ -64,10 +64,25 @@ export class SlackListenerUseCase {
       const workerReply = await this.workerClient.sendSlackMessageEvent(workerEvent);
 
       if (workerReply.status === "reply") {
-        await this.slackMessenger.sendMessage({
+        const replyThreadTs = workerReply.threadTs ?? event.threadTs ?? event.messageTs;
+        const postedMessage = await this.slackMessenger.sendMessage({
           channelId: event.channelId,
-          threadTs: workerReply.threadTs ?? event.threadTs ?? event.messageTs,
+          threadTs: replyThreadTs,
           text: workerReply.text,
+        });
+        await this.workerClient.sendSlackMessageEvent({
+          source: "slack",
+          teamId: event.teamId,
+          channelId: event.channelId,
+          userId: this.botUserId,
+          text: workerReply.text,
+          messageTs: postedMessage.messageTs,
+          threadTs: replyThreadTs,
+          channelType: event.channelType,
+          isMention: false,
+          isThreadMessage: true,
+          idempotencyKey: `slack:${event.teamId}:${event.channelId}:${postedMessage.messageTs}`,
+          processingIntent: "capture",
         });
       }
 

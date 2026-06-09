@@ -3,6 +3,7 @@ import { App, LogLevel } from "@slack/bolt";
 import type { LoggerPort } from "../../ports/logger.port.js";
 import type {
   SendSlackMessageInput,
+  SendSlackMessageResult,
   SlackMessengerPort,
 } from "../../ports/slack-messenger.port.js";
 import type { SlackSocketPort } from "../../ports/slack-socket.port.js";
@@ -50,12 +51,20 @@ export class SlackSocketModeAdapter implements SlackSocketPort, SlackMessengerPo
     return response.user_id;
   }
 
-  async sendMessage(input: SendSlackMessageInput): Promise<void> {
-    await this.app.client.chat.postMessage({
+  async sendMessage(input: SendSlackMessageInput): Promise<SendSlackMessageResult> {
+    const response = await this.app.client.chat.postMessage({
       channel: input.channelId,
       text: input.text,
       thread_ts: input.threadTs,
     });
+
+    if (!response.ts) {
+      throw new AppError("SLACK_MESSAGE_TS_MISSING", "Slack did not return a message timestamp");
+    }
+
+    return {
+      messageTs: response.ts,
+    };
   }
 
   private registerSlackEventHandlers(): void {

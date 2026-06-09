@@ -4,6 +4,10 @@ export type SendSlackMessageInput = {
   text: string;
 };
 
+export type SendSlackMessageResult = {
+  messageTs: string;
+};
+
 export interface SlackMessengerPort {
-  sendMessage(input: SendSlackMessageInput): Promise<void>;
+  sendMessage(input: SendSlackMessageInput): Promise<SendSlackMessageResult>;
 }
