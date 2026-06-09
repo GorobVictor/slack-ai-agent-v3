@@ -13,6 +13,7 @@ This repository uses Cursor rules and skills to guide agent work. The primary pr
 - Keep Cloudflare bindings, Slack API calls, storage, and other external services behind ports and adapters.
 - Store passive Slack message history through `SlackMessageHistoryPort`; use D1 only inside storage adapters or the Worker composition root.
 - Preserve the reply rule: DMs and explicit mentions invoke Think, while unmentioned channel/group/MPIM messages are capture-only.
+- Capture bot replies through the same Worker history flow after Slack returns the posted message timestamp.
 - Write repository content in English.
 - Save approved Plan Mode plans under `proto/features/`.
 - Do not commit `checkpoint.md`, secrets, or local artifacts such as `.DS_Store`.

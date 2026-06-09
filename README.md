@@ -14,7 +14,7 @@ The Worker should stay thin at the entrypoint and delegate behavior through use 
 
 ## Slack Listener
 
-The Node.js Slack listener entrypoint is `src/cmd/listener/index.ts`. It connects to Slack through Socket Mode, normalizes bot-visible message events, marks each event as `capture` or `invoke`, forwards it to the Worker HTTP endpoint, and posts Worker replies back to Slack.
+The Node.js Slack listener entrypoint is `src/cmd/listener/index.ts`. It connects to Slack through Socket Mode, normalizes bot-visible message events, marks each event as `capture` or `invoke`, forwards it to the Worker HTTP endpoint, posts Worker replies back to Slack, and captures posted bot replies back through the Worker for history.
 
 Run it locally with:
 
@@ -104,7 +104,7 @@ The Worker returns one of:
 { "status": "error", "code": "SLACK_EVENT_INVALID", "message": "Slack event payload is invalid" }
 ```
 
-Captured Slack history is stored in the `slack_messages` D1 table. The Think agent has a bounded `getSlackHistoryContext` tool for summarizing recent history by `thread`, `channel`, or `channel_with_threads`.
+Captured Slack history is stored in the `slack_messages` D1 table. It includes user messages the bot can see and bot replies after Slack accepts the posted message. The Think agent has a bounded `getSlackHistoryContext` tool for summarizing recent history by `thread`, `channel`, or `channel_with_threads`.
 
 Use `npm run typecheck`, `npm test`, and `npx wrangler deploy --dry-run` before deploying Worker changes.
 
