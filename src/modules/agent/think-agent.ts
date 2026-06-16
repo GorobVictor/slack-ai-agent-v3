@@ -1,13 +1,12 @@
 import { Think, type SkillSource } from "@cloudflare/think";
-import { tool, type LanguageModel, type ToolSet, type UIMessage } from "ai";
+import { type LanguageModel, type ToolSet, type UIMessage } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
-import { z } from "zod";
 
 import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-message-history.adapter.js";
-import { BuildSlackHistoryContextUseCase } from "../slack/slack-history-summary.use-case.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import { buildSlackAgentSystemPrompt } from "./agent.prompts.js";
 import { slackAgentSkillSource } from "./agent.skills.js";
+import { createSlackAgentTools } from "./agent.tools.js";
 import type {
   RunSlackTurnInput,
   RunSlackTurnResult,
@@ -35,44 +34,10 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
   }
 
   override getTools(): ToolSet {
-    return {
-      getSlackHistoryContext: tool({
-        description:
-          "Read captured Slack history for summarization. Use this before summarizing a thread, channel, or channel with threads.",
-        inputSchema: z.object({
-          scope: z
-            .enum(["thread", "channel", "channel_with_threads"])
-            .describe("The Slack history scope to read."),
-          days: z
-            .number()
-            .int()
-            .min(1)
-            .max(30)
-            .describe("How many days of recent captured history to include."),
-          threadTs: z
-            .string()
-            .min(1)
-            .optional()
-            .describe("Thread timestamp for thread summaries. Defaults to the current thread."),
-        }),
-        execute: async (input) => {
-          if (!this.activeSlackEvent) {
-            return "Slack history context is only available while processing a Slack message.";
-          }
-
-          const useCase = new BuildSlackHistoryContextUseCase(
-            new D1SlackMessageHistoryAdapter(this.env.SLACK_HISTORY_DB),
-          );
-
-          return useCase.execute({
-            currentEvent: this.activeSlackEvent,
-            scope: input.scope,
-            days: input.days,
-            threadTs: input.threadTs,
-          });
-        },
-      }),
-    };
+    return createSlackAgentTools({
+      history: new D1SlackMessageHistoryAdapter(this.env.SLACK_HISTORY_DB),
+      getActiveSlackEvent: () => this.activeSlackEvent,
+    });
   }
 
   async runSlackTurn(input: RunSlackTurnInput): Promise<RunSlackTurnResult> {
