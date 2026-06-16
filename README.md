@@ -274,6 +274,12 @@ Create local listener environment from the template:
 cp .env.example .env
 ```
 
+For local Worker development, create Wrangler local values from the Worker template:
+
+```sh
+cp .dev.vars.example .dev.vars
+```
+
 Required listener variables:
 
 ```txt
@@ -295,6 +301,8 @@ Required Worker secret:
 ```txt
 WORKER_INTERNAL_API_TOKEN
 ```
+
+`WORKER_SLACK_EVENT_URL` should point at the Worker Slack endpoint, for example `http://localhost:8787/slack/events`.
 
 Worker bindings and vars in `wrangler.jsonc`:
 

@@ -171,6 +171,7 @@ LOG_LEVEL
 ```
 
 Worker configuration lives in `wrangler.jsonc`.
+Use `.dev.vars` for local Worker secrets and create it from `.dev.vars.example`.
 
 Important Worker bindings and vars:
 
