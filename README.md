@@ -161,6 +161,8 @@ AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 
 Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`. Generated agent skills are stored in D1 table `generated_skills` through `GeneratedSkillPort`.
 
+Generated skills are learned after successful invoked Slack turns. Reflection receives recent Slack context and the current generated skill catalog, then returns a `skip`, `create`, or `update` decision. Approved skills store typed `body_json` plus canonical rendered `body` markdown. Updates preserve history by marking the old row with `is_old = 1` and inserting a new current version.
+
 ```mermaid
 flowchart TD
   workerUseCase["HandleSlackMessageUseCase.execute()"] --> port["SlackMessageHistoryPort"]
@@ -349,10 +351,12 @@ Important files:
 - `src/modules/slack/slack-history-summary.use-case.ts`
 - `src/modules/agent/think-agent.ts`
 - `src/modules/agent/skill-reflection.use-case.ts`
+- `src/modules/agent/generated-skill-body.ts`
 - `src/adapters/storage/d1-slack-message-history.adapter.ts`
 - `src/adapters/storage/d1-generated-skill.adapter.ts`
 - `migrations/0001_slack_messages.sql`
 - `migrations/0002_generated_skills.sql`
+- `migrations/0003_generated_skill_versions.sql`
 
 ## Verification
 
