@@ -11,6 +11,7 @@ export { SlackThinkAgent };
 
 export type WorkerEnv = {
   AI: Ai;
+  AI_GATEWAY_ID?: string;
   AI_MODEL?: string;
   SLACK_THINK_AGENT: DurableObjectNamespace<SlackThinkAgent>;
   SLACK_HISTORY_DB: D1Database;

@@ -6,6 +6,7 @@ import { ConsoleLoggerAdapter } from "../../adapters/logger/console-logger.adapt
 import { D1GeneratedSkillAdapter } from "../../adapters/storage/d1-generated-skill.adapter.js";
 import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-message-history.adapter.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
+import { buildWorkersAIGatewayOptions } from "./agent-ai-gateway.js";
 import { buildSlackAgentSystemPrompt } from "./agent.prompts.js";
 import { createSlackAgentSkillSources } from "./agent.skills.js";
 import { createSlackAgentTools } from "./agent.tools.js";
@@ -26,9 +27,10 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
   private activeSlackEvent: SlackWorkerRequest | null = null;
 
   override getModel(): LanguageModel {
-    return createWorkersAI({ binding: this.env.AI })(
-      this.env.AI_MODEL ?? DEFAULT_WORKERS_AI_MODEL,
-    );
+    return createWorkersAI({
+      binding: this.env.AI,
+      gateway: buildWorkersAIGatewayOptions(this.env.AI_GATEWAY_ID),
+    })(this.env.AI_MODEL ?? DEFAULT_WORKERS_AI_MODEL);
   }
 
   override getSystemPrompt(): string {
