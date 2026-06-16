@@ -59,6 +59,121 @@ describe("SlackListenerUseCase", () => {
     });
   });
 
+  it("retries Slack reply posts before capturing the bot reply", async () => {
+    const sentMessages: Array<{ channelId: string; threadTs: string; text: string }> = [];
+    const workerEvents: SlackWorkerRequest[] = [];
+    const postAttempts = { count: 0 };
+    const useCase = new SlackListenerUseCase(
+      workerClient({ status: "reply", text: "Hello after retry" }, workerEvents),
+      flakyMessenger(sentMessages, postAttempts, 2),
+      trackedThreads(),
+      logger,
+      BOT_USER_ID,
+    );
+
+    await useCase.handleRawSlackEvent({
+      body: {
+        event_id: "Ev123",
+        team_id: "T123",
+      },
+      event: {
+        type: "app_mention",
+        channel: "C123",
+        user: "U123",
+        text: "<@UBOT> hi",
+        ts: "1710000000.000100",
+      },
+    });
+
+    expect(postAttempts.count).toBe(3);
+    expect(sentMessages).toEqual([
+      {
+        channelId: "C123",
+        threadTs: "1710000000.000100",
+        text: "Hello after retry",
+      },
+    ]);
+    expect(workerEvents[1]).toMatchObject({
+      text: "Hello after retry",
+      processingIntent: "capture",
+    });
+  });
+
+  it("posts a fallback Slack reply when Worker delivery fails for invoke events", async () => {
+    const sentMessages: Array<{ channelId: string; threadTs: string; text: string }> = [];
+    const useCase = new SlackListenerUseCase(
+      failingWorkerClient(),
+      messenger(sentMessages),
+      trackedThreads(),
+      logger,
+      BOT_USER_ID,
+    );
+
+    await useCase.handleRawSlackEvent({
+      body: {
+        event_id: "Ev123",
+        team_id: "T123",
+      },
+      event: {
+        type: "app_mention",
+        channel: "C123",
+        user: "U123",
+        text: "<@UBOT> hi",
+        ts: "1710000000.000100",
+      },
+    });
+
+    expect(sentMessages).toEqual([
+      {
+        channelId: "C123",
+        threadTs: "1710000000.000100",
+        text: "Something went wrong while processing your request. Please try again.",
+      },
+    ]);
+  });
+
+  it("posts a fallback Slack reply when Worker returns an error response", async () => {
+    const sentMessages: Array<{ channelId: string; threadTs: string; text: string }> = [];
+    const workerEvents: SlackWorkerRequest[] = [];
+    const useCase = new SlackListenerUseCase(
+      workerClient(
+        {
+          status: "error",
+          code: "SLACK_EVENT_PROCESSING_FAILED",
+          message: "Failed to process Slack event",
+        },
+        workerEvents,
+      ),
+      messenger(sentMessages),
+      trackedThreads(),
+      logger,
+      BOT_USER_ID,
+    );
+
+    await useCase.handleRawSlackEvent({
+      body: {
+        event_id: "Ev123",
+        team_id: "T123",
+      },
+      event: {
+        type: "app_mention",
+        channel: "C123",
+        user: "U123",
+        text: "<@UBOT> hi",
+        ts: "1710000000.000100",
+      },
+    });
+
+    expect(workerEvents[0]?.processingIntent).toBe("invoke");
+    expect(sentMessages).toEqual([
+      {
+        channelId: "C123",
+        threadTs: "1710000000.000100",
+        text: "Something went wrong while processing your request. Please try again.",
+      },
+    ]);
+  });
+
   it("does not post Slack messages for no_reply responses", async () => {
     const sentMessages: Array<{ channelId: string; threadTs: string; text: string }> = [];
     const workerEvents: SlackWorkerRequest[] = [];
@@ -128,11 +243,40 @@ function workerClient(
   };
 }
 
+function failingWorkerClient(): WorkerEventClientPort {
+  return {
+    async sendSlackMessageEvent() {
+      throw new Error("Worker unavailable");
+    },
+  };
+}
+
 function messenger(
   sentMessages: Array<{ channelId: string; threadTs: string; text: string }>,
 ): SlackMessengerPort {
   return {
     async sendMessage(input) {
+      sentMessages.push(input);
+      return {
+        messageTs: "1710000000.000999",
+      };
+    },
+  };
+}
+
+function flakyMessenger(
+  sentMessages: Array<{ channelId: string; threadTs: string; text: string }>,
+  attempts: { count: number },
+  failuresBeforeSuccess: number,
+): SlackMessengerPort {
+  return {
+    async sendMessage(input) {
+      attempts.count += 1;
+
+      if (attempts.count <= failuresBeforeSuccess) {
+        throw new Error("Slack API unavailable");
+      }
+
       sentMessages.push(input);
       return {
         messageTs: "1710000000.000999",

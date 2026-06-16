@@ -9,6 +9,10 @@ import {
   SlackThreadTracker,
 } from "./slack-thread-tracker.js";
 import type { NormalizedSlackMessageEvent } from "./slack-listener.types.js";
+import { retry } from "../../tools/retry.tool.js";
+
+const FALLBACK_REPLY_TEXT =
+  "Something went wrong while processing your request. Please try again.";
 
 export class SlackListenerUseCase {
   private readonly threadTracker: SlackThreadTracker;
@@ -61,11 +65,20 @@ export class SlackListenerUseCase {
         ...event,
         processingIntent: decision.processingIntent,
       };
-      const workerReply = await this.workerClient.sendSlackMessageEvent(workerEvent);
+      const workerReply = await this.sendWorkerEventWithFallback(workerEvent);
+
+      if (!workerReply) {
+        return;
+      }
+
+      if (workerReply.status === "error") {
+        await this.sendFallbackReply(event);
+        return;
+      }
 
       if (workerReply.status === "reply") {
         const replyThreadTs = workerReply.threadTs ?? event.threadTs ?? event.messageTs;
-        const postedMessage = await this.slackMessenger.sendMessage({
+        const postedMessage = await this.sendSlackMessageWithRetry({
           channelId: event.channelId,
           threadTs: replyThreadTs,
           text: workerReply.text,
@@ -99,6 +112,54 @@ export class SlackListenerUseCase {
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
+  }
+
+  private async sendWorkerEventWithFallback(
+    event: NormalizedSlackMessageEvent & { processingIntent: "capture" | "invoke" },
+  ) {
+    try {
+      return await this.workerClient.sendSlackMessageEvent(event);
+    } catch (error) {
+      this.logger.error("Failed to forward Slack event to Worker", {
+        ...buildSafeLogMetadata(event),
+        processingIntent: event.processingIntent,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+
+      if (event.processingIntent === "invoke") {
+        await this.sendFallbackReply(event);
+      }
+
+      return null;
+    }
+  }
+
+  private async sendFallbackReply(event: NormalizedSlackMessageEvent): Promise<void> {
+    try {
+      await this.sendSlackMessageWithRetry({
+        channelId: event.channelId,
+        threadTs: event.threadTs ?? event.messageTs,
+        text: FALLBACK_REPLY_TEXT,
+      });
+    } catch (error) {
+      this.logger.error("Failed to send fallback Slack reply", {
+        ...buildSafeLogMetadata(event),
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  }
+
+  private async sendSlackMessageWithRetry(input: {
+    channelId: string;
+    threadTs: string;
+    text: string;
+  }) {
+    return retry(() => this.slackMessenger.sendMessage(input), {
+      attempts: 3,
+      initialDelayMs: 1_000,
+      maxDelayMs: 1_000,
+      factor: 1,
+    });
   }
 }
 
