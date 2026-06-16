@@ -1,5 +1,8 @@
-import { skills, type SkillSource } from "@cloudflare/think";
+import type { SkillSource } from "@cloudflare/think";
 
-import { slackAgentSkillManifest } from "./agent.skills.manifest.js";
+import type { GeneratedSkillPort } from "../../ports/generated-skill.port.js";
+import { createGeneratedSkillSource } from "./generated-skill-source.js";
 
-export const slackAgentSkillSource: SkillSource = skills.fromManifest(slackAgentSkillManifest);
+export function createSlackAgentSkillSources(repository: GeneratedSkillPort): SkillSource[] {
+  return [createGeneratedSkillSource(repository)];
+}

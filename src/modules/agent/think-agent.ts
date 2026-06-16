@@ -2,16 +2,22 @@ import { Think, type SkillSource } from "@cloudflare/think";
 import { type LanguageModel, type ToolSet, type UIMessage } from "ai";
 import { createWorkersAI } from "workers-ai-provider";
 
+import { ConsoleLoggerAdapter } from "../../adapters/logger/console-logger.adapter.js";
+import { D1GeneratedSkillAdapter } from "../../adapters/storage/d1-generated-skill.adapter.js";
 import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-message-history.adapter.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import { buildSlackAgentSystemPrompt } from "./agent.prompts.js";
-import { slackAgentSkillSource } from "./agent.skills.js";
+import { createSlackAgentSkillSources } from "./agent.skills.js";
 import { createSlackAgentTools } from "./agent.tools.js";
 import type {
   RunSlackTurnInput,
   RunSlackTurnResult,
   SlackThinkAgentEnv,
 } from "./agent.types.js";
+import {
+  createModelSkillReflectionCandidateGenerator,
+  ReflectOnSlackConversationForSkillUseCase,
+} from "./skill-reflection.use-case.js";
 
 const DEFAULT_WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 
@@ -30,7 +36,9 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
   }
 
   override getSkills(): SkillSource[] {
-    return [slackAgentSkillSource];
+    return createSlackAgentSkillSources(
+      new D1GeneratedSkillAdapter(this.env.SLACK_HISTORY_DB),
+    );
   }
 
   override getTools(): ToolSet {
@@ -76,6 +84,7 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
     }
 
     this.cacheSlackTurnReply(input.event.idempotencyKey, replyText);
+    await this.reflectOnSlackTurn(input.event, replyText);
 
     return { text: replyText };
   }
@@ -106,6 +115,21 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
       INSERT OR REPLACE INTO slack_turn_replies (idempotency_key, reply_text, created_at)
       VALUES (${idempotencyKey}, ${replyText}, ${Date.now()})
     `;
+  }
+
+  private async reflectOnSlackTurn(
+    event: SlackWorkerRequest,
+    assistantReply: string,
+  ): Promise<void> {
+    await new ReflectOnSlackConversationForSkillUseCase({
+      history: new D1SlackMessageHistoryAdapter(this.env.SLACK_HISTORY_DB),
+      skills: new D1GeneratedSkillAdapter(this.env.SLACK_HISTORY_DB),
+      generateCandidate: createModelSkillReflectionCandidateGenerator(this.getModel()),
+      logger: new ConsoleLoggerAdapter("info"),
+    }).execute({
+      event,
+      assistantReply,
+    });
   }
 }
 
