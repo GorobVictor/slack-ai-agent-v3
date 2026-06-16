@@ -95,6 +95,23 @@ Important behavior:
 - Think tools must call use cases and ports, not storage or Slack APIs directly.
 - Do not manually build a custom LLM loop unless the user explicitly asks for it.
 - The default Workers AI model is configured by `AI_MODEL` in `wrangler.jsonc`.
+- Runtime skills come only from D1-backed generated skills through `createSlackAgentSkillSources()`.
+- Do not add repository skill manifests for runtime skills.
+- After a successful invoked Slack turn, `SlackThinkAgent` runs `ReflectOnSlackConversationForSkillUseCase` to extract reusable workflows, validate them with `generated-skill-policy`, and upsert approved skills into D1.
+- Generated skills are universal and not scoped to workspace, channel, thread, or user.
+- Disable a generated skill by setting `disabled = 1` in D1; disabled skills remain stored but are not loaded by Think.
+
+## Generated Skills Rules
+
+- Generated skills are stored through `GeneratedSkillPort`.
+- D1 access belongs in `src/adapters/storage/d1-generated-skill.adapter.ts`.
+- In-memory storage belongs in `src/adapters/storage/in-memory-generated-skill.adapter.ts` and is primarily for tests.
+- The D1 table is `generated_skills`.
+- The D1 binding is `SLACK_HISTORY_DB` (same database as Slack history).
+- Think loads enabled skills through `src/modules/agent/generated-skill-source.ts`.
+- Auto-approval policy lives in `src/modules/agent/generated-skill-policy.ts`.
+- Post-turn reflection lives in `src/modules/agent/skill-reflection.use-case.ts`.
+- Generated skills may only declare `getSlackHistoryContext` as an allowed tool.
 
 ## Slack History Rules
 
@@ -139,6 +156,7 @@ Use existing ports before adding new ones:
 - `SlackSocketPort` for Slack Socket Mode listening.
 - `ThinkSessionPort` for Worker-to-Think submission.
 - `SlackMessageHistoryPort` for D1-backed Slack history.
+- `GeneratedSkillPort` for D1-backed generated agent skills.
 - `TrackedThreadStorePort` for listener-side tracked thread metadata.
 - `LoggerPort` for structured logging.
 
@@ -225,6 +243,11 @@ Current focused test areas:
 - `src/modules/slack/slack.handler.test.ts`.
 - `src/modules/slack/slack-history-summary.use-case.test.ts`.
 - `src/adapters/storage/d1-slack-message-history.adapter.test.ts`.
+- `src/adapters/storage/d1-generated-skill.adapter.test.ts`.
+- `src/modules/agent/generated-skill-policy.test.ts`.
+- `src/modules/agent/generated-skill-source.test.ts`.
+- `src/modules/agent/skill-reflection.use-case.test.ts`.
+- `src/modules/agent/agent.skills.test.ts`.
 
 ## Verification
 

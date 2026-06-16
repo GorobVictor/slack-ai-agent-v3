@@ -1,6 +1,6 @@
 # Slack AI Agent v3
 
-Slack AI Agent v3 is a Slack assistant built from a thin Node.js Slack Socket Mode listener, a Cloudflare Worker application boundary, and a durable `@cloudflare/think` agent. The listener owns Slack WebSocket and Slack Web API integration. The Worker owns validation, history capture, session routing, and Think orchestration. D1 stores passive Slack history so the agent can summarize thread and channel context.
+Slack AI Agent v3 is a Slack assistant built from a thin Node.js Slack Socket Mode listener, a Cloudflare Worker application boundary, and a durable `@cloudflare/think` agent. The listener owns Slack WebSocket and Slack Web API integration. The Worker owns validation, history capture, session routing, and Think orchestration. D1 stores passive Slack history so the agent can summarize thread and channel context, and auto-approved generated skills so the agent can reuse learned workflows.
 
 ## Runtime Architecture
 
@@ -158,7 +158,7 @@ AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 
 ## Slack History And Summaries
 
-Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`.
+Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`. Generated agent skills are stored in D1 table `generated_skills` through `GeneratedSkillPort`.
 
 ```mermaid
 flowchart TD
@@ -264,7 +264,7 @@ Apply remote migrations for deployed environments:
 npx wrangler d1 migrations apply slack-ai-agent-v3-history --remote
 ```
 
-If `wrangler dev` reports `D1_ERROR: no such table: slack_messages`, apply local migrations again and restart `wrangler dev` if needed.
+If `wrangler dev` reports `D1_ERROR: no such table: slack_messages` or `no such table: generated_skills`, apply local migrations again and restart `wrangler dev` if needed.
 
 ## Environment
 
@@ -346,8 +346,11 @@ Important files:
 - `src/modules/slack/handle-slack-message.use-case.ts`
 - `src/modules/slack/slack-history-summary.use-case.ts`
 - `src/modules/agent/think-agent.ts`
+- `src/modules/agent/skill-reflection.use-case.ts`
 - `src/adapters/storage/d1-slack-message-history.adapter.ts`
+- `src/adapters/storage/d1-generated-skill.adapter.ts`
 - `migrations/0001_slack_messages.sql`
+- `migrations/0002_generated_skills.sql`
 
 ## Verification
 
