@@ -67,7 +67,7 @@ function formatMetadata(metadata?: Record<string, unknown>): string {
         return [];
       }
 
-      return `{${key}}=[${formatMetadataValue(value)}]`;
+      return `${key}=${formatMetadataValue(value)}`;
     })
     .join(" ");
 }
