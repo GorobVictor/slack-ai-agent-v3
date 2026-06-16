@@ -1,4 +1,4 @@
-import { generateObject, type LanguageModel } from "ai";
+import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 
 import type { GeneratedSkill } from "../../ports/generated-skill.port.js";
@@ -200,16 +200,18 @@ export function createModelSkillReflectionCandidateGenerator(
   model: LanguageModel,
 ): SkillReflectionCandidateGenerator {
   return async (input) => {
-    const result = await generateObject({
+    const result = await generateText({
       model,
-      schema: skillReflectionDecisionSchema,
-      schemaName: "SkillReflectionDecision",
-      schemaDescription: "A create, update, or skip decision for generated reusable skills.",
+      output: Output.object({
+        schema: skillReflectionDecisionSchema,
+        name: "SkillReflectionDecision",
+        description: "A create, update, or skip decision for generated reusable skills.",
+      }),
       system: buildSkillReflectionSystemPrompt(),
       prompt: buildSkillReflectionPrompt(input),
     });
 
-    return result.object;
+    return result.output;
   };
 }
 
