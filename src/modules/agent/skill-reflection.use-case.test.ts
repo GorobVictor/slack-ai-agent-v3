@@ -2,12 +2,13 @@ import { describe, expect, it } from "vitest";
 
 import { InMemoryGeneratedSkillAdapter } from "../../adapters/storage/in-memory-generated-skill.adapter.js";
 import { InMemorySlackMessageHistoryAdapter } from "../../adapters/storage/in-memory-slack-message-history.adapter.js";
+import type { GeneratedSkill } from "../../ports/generated-skill.port.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
-import type { GeneratedSkillCandidate } from "./generated-skill-policy.js";
+import type { SkillReflectionDecision } from "./generated-skill-policy.js";
 import { ReflectOnSlackConversationForSkillUseCase } from "./skill-reflection.use-case.js";
 
 describe("ReflectOnSlackConversationForSkillUseCase", () => {
-  it("stores an approved generated skill", async () => {
+  it("stores a create decision as version 1", async () => {
     const history = new InMemorySlackMessageHistoryAdapter();
     const skills = new InMemoryGeneratedSkillAdapter();
     const currentEvent = event();
@@ -16,7 +17,7 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
     const result = await new ReflectOnSlackConversationForSkillUseCase({
       history,
       skills,
-      generateCandidate: async () => candidate(),
+      generateCandidate: async () => createDecision(),
     }).execute({
       event: currentEvent,
       assistantReply: "Here is a concise blocker summary.",
@@ -28,10 +29,60 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
     });
     await expect(skills.loadEnabledSkill("summarize-recurring-blockers")).resolves.toMatchObject({
       name: "summarize-recurring-blockers",
+      version: 1,
+      isOld: false,
     });
   });
 
-  it("skips weak candidates", async () => {
+  it("updates an existing skill by creating a new version", async () => {
+    const history = new InMemorySlackMessageHistoryAdapter();
+    const skills = new InMemoryGeneratedSkillAdapter([existingSkill()]);
+    const currentEvent = event();
+    await history.saveMessage(currentEvent);
+
+    const result = await new ReflectOnSlackConversationForSkillUseCase({
+      history,
+      skills,
+      generateCandidate: async () => updateDecision(),
+    }).execute({
+      event: currentEvent,
+      assistantReply: "Here is an improved blocker summary.",
+    });
+
+    expect(result).toEqual({
+      status: "updated",
+      name: "summarize-recurring-blockers",
+    });
+    await expect(skills.loadEnabledSkill("summarize-recurring-blockers")).resolves.toMatchObject({
+      version: 2,
+      isOld: false,
+    });
+  });
+
+  it("passes existing skill catalog to the candidate generator", async () => {
+    const history = new InMemorySlackMessageHistoryAdapter();
+    const skills = new InMemoryGeneratedSkillAdapter([existingSkill()]);
+    const currentEvent = event();
+    await history.saveMessage(currentEvent);
+    let catalog = "";
+
+    await new ReflectOnSlackConversationForSkillUseCase({
+      history,
+      skills,
+      generateCandidate: async (input) => {
+        catalog = input.existingSkillsCatalog;
+        return { action: "skip", confidence: 0.9, reason: "Already covered." };
+      },
+    }).execute({
+      event: currentEvent,
+      assistantReply: "Done.",
+    });
+
+    expect(catalog).toContain("name: summarize-recurring-blockers");
+    expect(catalog).toContain("version: 1");
+  });
+
+  it("skips weak decisions", async () => {
     const history = new InMemorySlackMessageHistoryAdapter();
     const skills = new InMemoryGeneratedSkillAdapter();
     const currentEvent = event();
@@ -40,11 +91,11 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
     const result = await new ReflectOnSlackConversationForSkillUseCase({
       history,
       skills,
-      generateCandidate: async () =>
-        candidate({
-          shouldCreate: false,
-          confidence: 0.1,
-        }),
+      generateCandidate: async () => ({
+        action: "skip",
+        confidence: 0.1,
+        reason: "No reusable pattern.",
+      }),
     }).execute({
       event: currentEvent,
       assistantReply: "Done.",
@@ -78,17 +129,82 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
   });
 });
 
-function candidate(overrides: Partial<GeneratedSkillCandidate> = {}): GeneratedSkillCandidate {
+function createDecision(): SkillReflectionDecision {
   return {
-    shouldCreate: true,
+    action: "create",
+    candidate: {
+      name: "summarize-recurring-blockers",
+      description:
+        "Summarize recurring blockers from recent discussion. Use when users ask about repeated blockers or unresolved follow-ups.",
+      body: {
+        goal: "Summarize recurring blockers from recent discussion.",
+        triggers: ["Use when users ask about repeated blockers or unresolved follow-ups."],
+        instructions: [
+          "Review recent context.",
+          "Group repeated blockers.",
+          "Identify owners when explicit.",
+          "Avoid inventing missing details.",
+        ],
+      },
+      allowedTools: "getSlackHistoryContext",
+      confidence: 0.95,
+      reason: "The conversation showed a reusable summary workflow.",
+    },
+  };
+}
+
+function updateDecision(): SkillReflectionDecision {
+  const currentCandidate = createCandidate();
+
+  return {
+    action: "update",
+    existingSkillName: "summarize-recurring-blockers",
+    candidate: {
+      ...currentCandidate,
+      body: {
+        goal: "Summarize recurring blockers from recent discussion.",
+        triggers: ["Use when users ask about repeated blockers or unresolved follow-ups."],
+        instructions: [
+          "Review recent context.",
+          "Group repeated blockers by topic.",
+          "Identify explicit owners only.",
+          "Avoid inventing missing details.",
+        ],
+      },
+      reason: "The new conversation improved the blocker summary workflow.",
+    },
+  };
+}
+
+function createCandidate() {
+  const decision = createDecision();
+  return decision.action === "create" ? decision.candidate : neverCreateDecision();
+}
+
+function neverCreateDecision(): never {
+  throw new Error("Expected create decision.");
+}
+
+function existingSkill(): GeneratedSkill {
+  return {
+    id: "skill-1",
     name: "summarize-recurring-blockers",
     description:
       "Summarize recurring blockers from recent discussion. Use when users ask about repeated blockers or unresolved follow-ups.",
-    body: "Review recent context, group repeated blockers, identify owners when explicit, and avoid inventing missing details.",
+    body: "## Goal\n\nSummarize recurring blockers from recent discussion.",
+    bodyJson: {
+      goal: "Summarize recurring blockers from recent discussion.",
+      triggers: ["Use when users ask about repeated blockers or unresolved follow-ups."],
+      instructions: ["Review recent context.", "Group repeated blockers."],
+    },
     allowedTools: "getSlackHistoryContext",
+    version: 1,
+    isOld: false,
+    disabled: false,
     confidence: 0.95,
-    reason: "The conversation showed a reusable summary workflow.",
-    ...overrides,
+    autoApprovalReason: "Reusable workflow.",
+    createdAt: 1710000000000,
+    updatedAt: 1710000000000,
   };
 }
 

@@ -1,21 +1,41 @@
-import type { UpsertAutoApprovedSkillInput } from "../../ports/generated-skill.port.js";
+import type {
+  AutoApprovedGeneratedSkillCandidate,
+  GeneratedSkillBody,
+  SaveAutoApprovedSkillDecisionInput,
+} from "../../ports/generated-skill.port.js";
+import { normalizeGeneratedSkillBody } from "./generated-skill-body.js";
 
 export const GENERATED_SKILL_ALLOWED_TOOLS = ["getSlackHistoryContext"] as const;
 
-export type GeneratedSkillCandidate = {
-  shouldCreate: boolean;
+export type TypedGeneratedSkillCandidate = {
   name: string;
   description: string;
-  body: string;
+  body: GeneratedSkillBody;
   allowedTools?: string;
   confidence: number;
   reason: string;
 };
 
+export type SkillReflectionDecision =
+  | {
+      action: "skip";
+      reason: string;
+      confidence: number;
+    }
+  | {
+      action: "create";
+      candidate: TypedGeneratedSkillCandidate;
+    }
+  | {
+      action: "update";
+      existingSkillName: string;
+      candidate: TypedGeneratedSkillCandidate;
+    };
+
 export type GeneratedSkillPolicyResult =
   | {
       status: "approved";
-      skill: UpsertAutoApprovedSkillInput;
+      decision: SaveAutoApprovedSkillDecisionInput;
     }
   | {
       status: "rejected";
@@ -39,18 +59,19 @@ const UNSAFE_INSTRUCTION_PATTERN =
   /\b(ignore|bypass|override|disable)\b.{0,80}\b(system prompt|developer instruction|security|policy|rules?)\b/i;
 
 export function validateGeneratedSkillCandidate(
-  candidate: GeneratedSkillCandidate,
+  decision: SkillReflectionDecision,
 ): GeneratedSkillPolicyResult {
-  if (!candidate.shouldCreate) {
+  if (decision.action === "skip") {
     return {
       status: "rejected",
-      reason: "Candidate did not request creation.",
+      reason: decision.reason || "Skill reflection chose to skip creation.",
     };
   }
 
+  const candidate = decision.candidate;
   const name = normalizeSkillName(candidate.name);
   const description = normalizeSkillDescription(candidate.description);
-  const body = candidate.body.trim();
+  const bodyJson = normalizeGeneratedSkillBody(candidate.body);
   const reason = candidate.reason.trim();
   const allowedTools = normalizeAllowedTools(candidate.allowedTools);
 
@@ -75,10 +96,19 @@ export function validateGeneratedSkillCandidate(
     };
   }
 
-  if (!body || body.length > MAX_BODY_LENGTH || body.split("\n").length > MAX_BODY_LINES) {
+  if (decision.action === "update" && !normalizeSkillName(decision.existingSkillName)) {
     return {
       status: "rejected",
-      reason: "Candidate body is missing or too large.",
+      reason: "Update decisions must include an existing skill name.",
+    };
+  }
+
+  const bodyValidationError = validateSkillBody(bodyJson);
+
+  if (bodyValidationError) {
+    return {
+      status: "rejected",
+      reason: bodyValidationError,
     };
   }
 
@@ -89,7 +119,7 @@ export function validateGeneratedSkillCandidate(
     };
   }
 
-  const searchableText = [name, description, body, reason].join("\n");
+  const searchableText = [name, description, JSON.stringify(bodyJson), reason].join("\n");
 
   if (SECRET_PATTERNS.some((pattern) => pattern.test(searchableText))) {
     return {
@@ -112,16 +142,41 @@ export function validateGeneratedSkillCandidate(
     };
   }
 
+  const approvedCandidate: AutoApprovedGeneratedSkillCandidate = {
+    name,
+    description,
+    body: bodyJson,
+    allowedTools,
+    confidence: candidate.confidence,
+    autoApprovalReason: reason || "Auto-approved reusable conversation pattern.",
+  };
+
+  if (decision.action === "update") {
+    return {
+      status: "approved",
+      decision: {
+        action: "update",
+        existingSkillName: normalizeSkillName(decision.existingSkillName),
+        candidate: approvedCandidate,
+      },
+    };
+  }
+
   return {
     status: "approved",
-    skill: {
-      name,
-      description,
-      body,
-      allowedTools,
-      confidence: candidate.confidence,
-      autoApprovalReason: reason || "Auto-approved reusable conversation pattern.",
+    decision: {
+      action: "create",
+      candidate: approvedCandidate,
     },
+  };
+}
+
+export function toLegacyCandidate(
+  candidate: AutoApprovedGeneratedSkillCandidate,
+): TypedGeneratedSkillCandidate {
+  return {
+    ...candidate,
+    reason: candidate.autoApprovalReason,
   };
 }
 
@@ -147,4 +202,37 @@ function normalizeSkillDescription(value: string): string {
   }
 
   return `${description} Use when a future user request clearly matches this reusable workflow.`;
+}
+
+function validateSkillBody(body: GeneratedSkillBody): string | null {
+  const serialized = JSON.stringify(body);
+  const renderedLineCount = [
+    body.goal,
+    ...body.triggers,
+    ...body.instructions,
+    ...(body.safetyNotes ?? []),
+    ...(body.toolUsage?.map((usage) => `${usage.tool} ${usage.when}`) ?? []),
+  ].join("\n").split("\n").length;
+
+  if (!body.goal || body.goal.length > MAX_BODY_LENGTH) {
+    return "Candidate body goal is missing or too large.";
+  }
+
+  if (body.triggers.length === 0) {
+    return "Candidate body must include at least one trigger.";
+  }
+
+  if (body.instructions.length === 0) {
+    return "Candidate body must include at least one instruction.";
+  }
+
+  if (serialized.length > MAX_BODY_LENGTH || renderedLineCount > MAX_BODY_LINES) {
+    return "Candidate body is too large.";
+  }
+
+  if (body.toolUsage?.some((usage) => !GENERATED_SKILL_ALLOWED_TOOLS.some((tool) => tool === usage.tool))) {
+    return "Candidate body requested a tool that generated skills are not allowed to use.";
+  }
+
+  return null;
 }

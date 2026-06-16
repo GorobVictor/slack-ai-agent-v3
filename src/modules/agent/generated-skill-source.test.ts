@@ -10,6 +10,7 @@ describe("createGeneratedSkillSource", () => {
       new InMemoryGeneratedSkillAdapter([
         generatedSkill({ name: "enabled-skill" }),
         generatedSkill({ name: "disabled-skill", disabled: true }),
+        generatedSkill({ name: "old-skill", isOld: true }),
       ]),
     );
 
@@ -24,6 +25,7 @@ describe("createGeneratedSkillSource", () => {
       body: "Use this reusable workflow.",
     });
     await expect(source.load("disabled-skill")).resolves.toBeNull();
+    await expect(source.load("old-skill")).resolves.toBeNull();
   });
 });
 
@@ -33,8 +35,14 @@ function generatedSkill(overrides: Partial<GeneratedSkill> = {}): GeneratedSkill
     name: "enabled-skill",
     description: "Use this generated skill. Use when users ask for this reusable workflow.",
     body: "Use this reusable workflow.",
+    bodyJson: {
+      goal: "Use this reusable workflow.",
+      triggers: ["Use when users ask for this reusable workflow."],
+      instructions: ["Use this reusable workflow."],
+    },
     allowedTools: "getSlackHistoryContext",
     version: 1,
+    isOld: false,
     disabled: false,
     confidence: 0.95,
     autoApprovalReason: "Reusable workflow.",

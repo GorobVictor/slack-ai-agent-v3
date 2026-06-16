@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  type GeneratedSkillCandidate,
+  type SkillReflectionDecision,
+  type TypedGeneratedSkillCandidate,
   validateGeneratedSkillCandidate,
 } from "./generated-skill-policy.js";
 
@@ -11,9 +12,12 @@ describe("validateGeneratedSkillCandidate", () => {
 
     expect(result).toMatchObject({
       status: "approved",
-      skill: {
-        name: "summarize-recurring-blockers",
-        allowedTools: "getSlackHistoryContext",
+      decision: {
+        action: "create",
+        candidate: {
+          name: "summarize-recurring-blockers",
+          allowedTools: "getSlackHistoryContext",
+        },
       },
     });
   });
@@ -27,8 +31,10 @@ describe("validateGeneratedSkillCandidate", () => {
 
     expect(result).toMatchObject({
       status: "approved",
-      skill: {
-        name: "code-only-mode-with-safety-check",
+      decision: {
+        candidate: {
+          name: "code-only-mode-with-safety-check",
+        },
       },
     });
   });
@@ -51,9 +57,11 @@ describe("validateGeneratedSkillCandidate", () => {
 
     expect(result).toMatchObject({
       status: "approved",
-      skill: {
-        description:
-          "Summarize recurring blockers from recent discussion. Use when a future user request clearly matches this reusable workflow.",
+      decision: {
+        candidate: {
+          description:
+            "Summarize recurring blockers from recent discussion. Use when a future user request clearly matches this reusable workflow.",
+        },
       },
     });
   });
@@ -74,7 +82,11 @@ describe("validateGeneratedSkillCandidate", () => {
   it("rejects candidates containing Slack identifiers", () => {
     const result = validateGeneratedSkillCandidate(
       candidate({
-        body: "Always apply this instruction in channel C1234567890.",
+        body: {
+          goal: "Apply channel-specific instruction.",
+          triggers: ["Use when asked for channel-specific behavior."],
+          instructions: ["Always apply this instruction in channel C1234567890."],
+        },
       }),
     );
 
@@ -87,7 +99,11 @@ describe("validateGeneratedSkillCandidate", () => {
   it("rejects candidates containing secret-like values", () => {
     const result = validateGeneratedSkillCandidate(
       candidate({
-        body: "Use token xoxb-123456789012-abcdef whenever calling Slack.",
+        body: {
+          goal: "Call Slack with a token.",
+          triggers: ["Use when asked to call Slack."],
+          instructions: ["Use token xoxb-123456789012-abcdef whenever calling Slack."],
+        },
       }),
     );
 
@@ -98,16 +114,29 @@ describe("validateGeneratedSkillCandidate", () => {
   });
 });
 
-function candidate(overrides: Partial<GeneratedSkillCandidate> = {}): GeneratedSkillCandidate {
+function candidate(
+  overrides: Partial<TypedGeneratedSkillCandidate> = {},
+): SkillReflectionDecision {
   return {
-    shouldCreate: true,
-    name: "summarize-recurring-blockers",
-    description:
-      "Summarize recurring blockers from recent discussion. Use when users ask about repeated blockers or unresolved follow-ups.",
-    body: "Review recent context, group repeated blockers, identify owners when explicit, and avoid inventing missing details.",
-    allowedTools: "getSlackHistoryContext",
-    confidence: 0.95,
-    reason: "The conversation showed a reusable summary workflow.",
-    ...overrides,
+    action: "create",
+    candidate: {
+      name: "summarize-recurring-blockers",
+      description:
+        "Summarize recurring blockers from recent discussion. Use when users ask about repeated blockers or unresolved follow-ups.",
+      body: {
+        goal: "Summarize recurring blockers from recent discussion.",
+        triggers: ["Use when users ask about repeated blockers or unresolved follow-ups."],
+        instructions: [
+          "Review recent context.",
+          "Group repeated blockers.",
+          "Identify owners when explicit.",
+          "Avoid inventing missing details.",
+        ],
+      },
+      allowedTools: "getSlackHistoryContext",
+      confidence: 0.95,
+      reason: "The conversation showed a reusable summary workflow.",
+      ...overrides,
+    },
   };
 }

@@ -1,18 +1,25 @@
 import type {
   GeneratedSkill,
+  GeneratedSkillBody,
   GeneratedSkillCatalogStats,
   GeneratedSkillPort,
-  UpsertAutoApprovedSkillInput,
-  UpsertAutoApprovedSkillResult,
+  SaveAutoApprovedSkillDecisionInput,
+  SaveAutoApprovedSkillDecisionResult,
 } from "../../ports/generated-skill.port.js";
+import {
+  normalizeGeneratedSkillBody,
+  renderGeneratedSkillBody,
+} from "../../modules/agent/generated-skill-body.js";
 
 type GeneratedSkillRow = {
   id: string;
   name: string;
   description: string;
   body: string;
+  body_json: string;
   allowed_tools: string | null;
   version: number;
+  is_old: number;
   disabled: number;
   confidence: number;
   auto_approval_reason: string;
@@ -28,97 +35,88 @@ type CatalogStatsRow = {
 export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
   constructor(private readonly db: D1Database) {}
 
-  async upsertAutoApprovedSkill(
-    input: UpsertAutoApprovedSkillInput,
-  ): Promise<UpsertAutoApprovedSkillResult> {
-    const existing = await this.findSkillByName(input.name);
+  async saveAutoApprovedSkillDecision(
+    input: SaveAutoApprovedSkillDecisionInput,
+  ): Promise<SaveAutoApprovedSkillDecisionResult> {
+    const current =
+      input.action === "update"
+        ? await this.findSkillByName(input.existingSkillName)
+        : await this.findSkillByName(input.candidate.name);
 
-    if (existing?.disabled) {
+    if (current?.disabled) {
       return {
         status: "skipped_disabled",
-        skill: existing,
+        skill: current,
       };
     }
 
-    if (existing && isUnchanged(existing, input)) {
+    const renderedBody = renderGeneratedSkillBody(input.candidate.body);
+
+    if (current && isUnchanged(current, input, renderedBody)) {
       return {
         status: "unchanged",
-        skill: existing,
+        skill: current,
       };
     }
 
     const now = Date.now();
+    const version = current ? current.version + 1 : 1;
 
-    if (!existing) {
+    if (current) {
       await this.db
         .prepare(
           `
-            INSERT INTO generated_skills (
-              id,
-              name,
-              description,
-              body,
-              allowed_tools,
-              version,
-              disabled,
-              confidence,
-              auto_approval_reason,
-              created_at,
-              updated_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            UPDATE generated_skills
+            SET is_old = 1,
+              updated_at = ?
+            WHERE id = ?
           `,
         )
-        .bind(
-          crypto.randomUUID(),
-          input.name,
-          input.description,
-          input.body,
-          input.allowedTools ?? null,
-          1,
-          0,
-          input.confidence,
-          input.autoApprovalReason,
-          now,
-          now,
-        )
+        .bind(now, current.id)
         .run();
-
-      return {
-        status: "inserted",
-        skill: await this.loadEnabledSkill(input.name),
-      };
     }
 
     await this.db
       .prepare(
         `
-          UPDATE generated_skills
-          SET description = ?,
-            body = ?,
-            allowed_tools = ?,
-            version = version + 1,
-            confidence = ?,
-            auto_approval_reason = ?,
-            updated_at = ?
-          WHERE name = ?
-            AND disabled = 0
+          INSERT INTO generated_skills (
+            id,
+            name,
+            description,
+            body,
+            body_json,
+            allowed_tools,
+            version,
+            is_old,
+            disabled,
+            confidence,
+            auto_approval_reason,
+            created_at,
+            updated_at
+          )
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `,
       )
       .bind(
-        input.description,
-        input.body,
-        input.allowedTools ?? null,
-        input.confidence,
-        input.autoApprovalReason,
+        crypto.randomUUID(),
+        input.candidate.name,
+        input.candidate.description,
+        renderedBody,
+        JSON.stringify(normalizeGeneratedSkillBody(input.candidate.body)),
+        input.candidate.allowedTools ?? null,
+        version,
+        0,
+        0,
+        input.candidate.confidence,
+        input.candidate.autoApprovalReason,
         now,
-        input.name,
+        now,
       )
       .run();
 
     return {
-      status: "updated",
-      skill: await this.loadEnabledSkill(input.name),
+      status: current ? "updated" : "inserted",
+      skill: await this.loadEnabledSkill(input.candidate.name),
     };
   }
 
@@ -126,10 +124,12 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
     const result = await this.db
       .prepare(
         `
-          SELECT id, name, description, body, allowed_tools, version, disabled,
+          SELECT id, name, description, body, body_json, allowed_tools, version,
+            is_old, disabled,
             confidence, auto_approval_reason, created_at, updated_at
           FROM generated_skills
           WHERE disabled = 0
+            AND is_old = 0
           ORDER BY name ASC
         `,
       )
@@ -142,11 +142,14 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
     const row = await this.db
       .prepare(
         `
-          SELECT id, name, description, body, allowed_tools, version, disabled,
+          SELECT id, name, description, body, body_json, allowed_tools, version,
+            is_old, disabled,
             confidence, auto_approval_reason, created_at, updated_at
           FROM generated_skills
           WHERE name = ?
             AND disabled = 0
+            AND is_old = 0
+          ORDER BY version DESC
           LIMIT 1
         `,
       )
@@ -160,10 +163,13 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
     const row = await this.db
       .prepare(
         `
-          SELECT id, name, description, body, allowed_tools, version, disabled,
+          SELECT id, name, description, body, body_json, allowed_tools, version,
+            is_old, disabled,
             confidence, auto_approval_reason, created_at, updated_at
           FROM generated_skills
           WHERE name = ?
+            AND is_old = 0
+          ORDER BY version DESC
           LIMIT 1
         `,
       )
@@ -180,6 +186,7 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
           SELECT COUNT(*) AS enabled_count, MAX(updated_at) AS max_updated_at
           FROM generated_skills
           WHERE disabled = 0
+            AND is_old = 0
         `,
       )
       .first<CatalogStatsRow>();
@@ -193,12 +200,13 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
 
 function isUnchanged(
   existing: GeneratedSkill,
-  input: UpsertAutoApprovedSkillInput,
+  input: SaveAutoApprovedSkillDecisionInput,
+  renderedBody: string,
 ): boolean {
   return (
-    existing.description === input.description &&
-    existing.body === input.body &&
-    existing.allowedTools === input.allowedTools
+    existing.description === input.candidate.description &&
+    existing.body === renderedBody &&
+    existing.allowedTools === input.candidate.allowedTools
   );
 }
 
@@ -208,12 +216,26 @@ function mapRow(row: GeneratedSkillRow): GeneratedSkill {
     name: row.name,
     description: row.description,
     body: row.body,
+    bodyJson: parseBodyJson(row.body_json),
     allowedTools: row.allowed_tools ?? undefined,
     version: row.version,
+    isOld: Boolean(row.is_old),
     disabled: Boolean(row.disabled),
     confidence: row.confidence,
     autoApprovalReason: row.auto_approval_reason,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+function parseBodyJson(value: string): GeneratedSkillBody {
+  try {
+    return normalizeGeneratedSkillBody(JSON.parse(value) as GeneratedSkillBody);
+  } catch {
+    return {
+      goal: "Legacy generated skill",
+      triggers: ["Use when a future user request clearly matches this reusable workflow."],
+      instructions: [value],
+    };
+  }
 }

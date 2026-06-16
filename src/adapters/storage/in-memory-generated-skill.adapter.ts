@@ -2,74 +2,93 @@ import type {
   GeneratedSkill,
   GeneratedSkillCatalogStats,
   GeneratedSkillPort,
-  UpsertAutoApprovedSkillInput,
-  UpsertAutoApprovedSkillResult,
+  SaveAutoApprovedSkillDecisionInput,
+  SaveAutoApprovedSkillDecisionResult,
 } from "../../ports/generated-skill.port.js";
+import {
+  normalizeGeneratedSkillBody,
+  renderGeneratedSkillBody,
+} from "../../modules/agent/generated-skill-body.js";
 
 export class InMemoryGeneratedSkillAdapter implements GeneratedSkillPort {
-  private readonly skills = new Map<string, GeneratedSkill>();
+  private readonly skills: GeneratedSkill[] = [];
 
   constructor(initialSkills: GeneratedSkill[] = []) {
-    for (const skill of initialSkills) {
-      this.skills.set(skill.name, skill);
-    }
+    this.skills.push(...initialSkills);
   }
 
-  async upsertAutoApprovedSkill(
-    input: UpsertAutoApprovedSkillInput,
-  ): Promise<UpsertAutoApprovedSkillResult> {
-    const existing = this.skills.get(input.name) ?? null;
+  async saveAutoApprovedSkillDecision(
+    input: SaveAutoApprovedSkillDecisionInput,
+  ): Promise<SaveAutoApprovedSkillDecisionResult> {
+    const current =
+      input.action === "update"
+        ? await this.findSkillByName(input.existingSkillName)
+        : await this.findSkillByName(input.candidate.name);
 
-    if (existing?.disabled) {
+    if (current?.disabled) {
       return {
         status: "skipped_disabled",
-        skill: existing,
+        skill: current,
       };
     }
 
-    if (existing && isUnchanged(existing, input)) {
+    const renderedBody = renderGeneratedSkillBody(input.candidate.body);
+
+    if (current && isUnchanged(current, input, renderedBody)) {
       return {
         status: "unchanged",
-        skill: existing,
+        skill: current,
       };
     }
 
     const now = Date.now();
+
+    if (current) {
+      current.isOld = true;
+      current.updatedAt = now;
+    }
+
     const skill: GeneratedSkill = {
-      id: existing?.id ?? crypto.randomUUID(),
-      name: input.name,
-      description: input.description,
-      body: input.body,
-      allowedTools: input.allowedTools,
-      version: existing ? existing.version + 1 : 1,
+      id: crypto.randomUUID(),
+      name: input.candidate.name,
+      description: input.candidate.description,
+      body: renderedBody,
+      bodyJson: normalizeGeneratedSkillBody(input.candidate.body),
+      allowedTools: input.candidate.allowedTools,
+      version: current ? current.version + 1 : 1,
+      isOld: false,
       disabled: false,
-      confidence: input.confidence,
-      autoApprovalReason: input.autoApprovalReason,
-      createdAt: existing?.createdAt ?? now,
+      confidence: input.candidate.confidence,
+      autoApprovalReason: input.candidate.autoApprovalReason,
+      createdAt: now,
       updatedAt: now,
     };
 
-    this.skills.set(input.name, skill);
+    this.skills.push(skill);
 
     return {
-      status: existing ? "updated" : "inserted",
+      status: current ? "updated" : "inserted",
       skill,
     };
   }
 
   async listEnabledSkills(): Promise<GeneratedSkill[]> {
-    return [...this.skills.values()]
-      .filter((skill) => !skill.disabled)
+    return this.skills
+      .filter((skill) => !skill.disabled && !skill.isOld)
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
   async loadEnabledSkill(name: string): Promise<GeneratedSkill | null> {
-    const skill = this.skills.get(name) ?? null;
-    return skill && !skill.disabled ? skill : null;
+    const skill = await this.findSkillByName(name);
+    return skill && !skill.disabled && !skill.isOld ? skill : null;
   }
 
   async findSkillByName(name: string): Promise<GeneratedSkill | null> {
-    return this.skills.get(name) ?? null;
+    return (
+      this.skills
+        .filter((skill) => skill.name === name && !skill.isOld)
+        .sort((left, right) => right.version - left.version)[0] ?? null
+    );
   }
 
   async getEnabledCatalogStats(): Promise<GeneratedSkillCatalogStats> {
@@ -87,11 +106,12 @@ export class InMemoryGeneratedSkillAdapter implements GeneratedSkillPort {
 
 function isUnchanged(
   existing: GeneratedSkill,
-  input: UpsertAutoApprovedSkillInput,
+  input: SaveAutoApprovedSkillDecisionInput,
+  renderedBody: string,
 ): boolean {
   return (
-    existing.description === input.description &&
-    existing.body === input.body &&
-    existing.allowedTools === input.allowedTools
+    existing.description === input.candidate.description &&
+    existing.body === renderedBody &&
+    existing.allowedTools === input.candidate.allowedTools
   );
 }

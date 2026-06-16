@@ -13,8 +13,17 @@ describe("createSlackAgentSkillSources", () => {
         description:
           "Summarize recurring blockers from recent discussion. Use when users ask about repeated blockers or unresolved follow-ups.",
         body: "Look for repeated blockers, decisions, owners, and follow-up items before replying.",
+        bodyJson: {
+          goal: "Summarize recurring blockers from recent discussion.",
+          triggers: ["Use when users ask about repeated blockers or unresolved follow-ups."],
+          instructions: [
+            "Look for repeated blockers.",
+            "Identify decisions, owners, and follow-up items before replying.",
+          ],
+        },
         allowedTools: "getSlackHistoryContext",
         version: 1,
+        isOld: false,
         disabled: false,
         confidence: 0.95,
         autoApprovalReason: "Reusable workflow for blocker summaries.",
