@@ -10,6 +10,12 @@ import type { SlackSocketPort } from "../../ports/slack-socket.port.js";
 import { AppError } from "../../shared/errors.js";
 import type { SlackRawEventEnvelope } from "../../modules/slack-listener/slack-listener.types.js";
 
+type SlackBodyMetadata = {
+  event_id?: unknown;
+  event_time?: unknown;
+  team_id?: unknown;
+};
+
 export type SlackSocketModeAdapterOptions = {
   botToken: string;
   appToken: string;
@@ -86,10 +92,48 @@ export class SlackSocketModeAdapter implements SlackSocketPort, SlackMessengerPo
   }
 
   private async dispatch(envelope: SlackRawEventEnvelope): Promise<void> {
+    const safeEnvelope = buildSafeSlackRawEventEnvelope(envelope);
+
     for (const handler of this.handlers) {
-      await handler(envelope);
+      await handler(safeEnvelope);
     }
   }
+}
+
+export function buildSafeSlackRawEventEnvelope(
+  envelope: SlackRawEventEnvelope,
+): SlackRawEventEnvelope {
+  return {
+    event: envelope.event,
+    body: buildSafeSlackBodyMetadata(envelope.body),
+  };
+}
+
+function buildSafeSlackBodyMetadata(body: unknown): SlackBodyMetadata | undefined {
+  if (!isRecord(body)) {
+    return undefined;
+  }
+
+  const safeBody: SlackBodyMetadata = {};
+  copyIfPresent(safeBody, body, "event_id");
+  copyIfPresent(safeBody, body, "event_time");
+  copyIfPresent(safeBody, body, "team_id");
+
+  return Object.keys(safeBody).length ? safeBody : undefined;
+}
+
+function copyIfPresent(
+  target: SlackBodyMetadata,
+  source: Record<string, unknown>,
+  key: keyof SlackBodyMetadata,
+): void {
+  if (source[key] !== undefined) {
+    target[key] = source[key];
+  }
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 export function toSlackLogLevel(logLevel: string): LogLevel {
