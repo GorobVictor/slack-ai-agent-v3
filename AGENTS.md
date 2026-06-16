@@ -95,6 +95,7 @@ Important behavior:
 - Think tools must call use cases and ports, not storage or Slack APIs directly.
 - Do not manually build a custom LLM loop unless the user explicitly asks for it.
 - The default Workers AI model is configured by `AI_MODEL` in `wrangler.jsonc`.
+- Cloudflare AI Gateway is configured by `AI_GATEWAY_ID` in `wrangler.jsonc`; use `default` unless a named gateway is required.
 - Runtime skills come only from D1-backed generated skills through `createSlackAgentSkillSources()`.
 - Do not add repository skill manifests for runtime skills.
 - After a successful invoked Slack turn, `SlackThinkAgent` runs `ReflectOnSlackConversationForSkillUseCase` to extract reusable workflows, validate them with `generated-skill-policy`, and upsert approved skills into D1.
@@ -195,6 +196,7 @@ Important Worker bindings and vars:
 
 ```text
 AI
+AI_GATEWAY_ID
 AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB

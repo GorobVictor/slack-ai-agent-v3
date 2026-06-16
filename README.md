@@ -144,15 +144,16 @@ flowchart TD
 
 `SlackThinkAgent` uses:
 
-- `getModel()` to create a Workers AI model through `createWorkersAI()`.
+- `getModel()` to create a Workers AI model through `createWorkersAI()` with Cloudflare AI Gateway enabled.
 - `getSystemPrompt()` to load `buildSlackAgentSystemPrompt()`.
 - `getTools()` to expose `getSlackHistoryContext`.
 - `runSlackTurn()` to submit Slack user messages to Think and return assistant text.
 - `slack_turn_replies` in Think SQLite storage to cache replies by idempotency key.
 
-The default model is configured in `wrangler.jsonc`:
+The default model and AI Gateway are configured in `wrangler.jsonc`:
 
 ```txt
+AI_GATEWAY_ID=default
 AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 ```
 
@@ -308,6 +309,7 @@ Worker bindings and vars in `wrangler.jsonc`:
 
 ```txt
 AI
+AI_GATEWAY_ID
 AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB
