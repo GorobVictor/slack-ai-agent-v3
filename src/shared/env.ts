@@ -20,7 +20,7 @@ export function loadListenerEnv(source: NodeJS.ProcessEnv = process.env): Listen
   const logLevel = readLogLevel(source.LOG_LEVEL);
   const slackBotUserId = readOptionalEnv(source, "SLACK_BOT_USER_ID");
 
-  validateUrl(workerSlackEventUrl, "WORKER_SLACK_EVENT_URL");
+  validateWorkerSlackEventUrl(workerSlackEventUrl);
 
   return {
     slackBotToken,
@@ -70,5 +70,18 @@ function validateUrl(value: string, key: string): void {
     new URL(value);
   } catch {
     throw new AppError("ENV_INVALID", `${key} must be a valid URL`, { key });
+  }
+}
+
+function validateWorkerSlackEventUrl(value: string): void {
+  validateUrl(value, "WORKER_SLACK_EVENT_URL");
+
+  const url = new URL(value);
+
+  if (url.pathname !== "/slack/events") {
+    throw new AppError("ENV_INVALID", "WORKER_SLACK_EVENT_URL must target /slack/events", {
+      key: "WORKER_SLACK_EVENT_URL",
+      pathname: url.pathname,
+    });
   }
 }

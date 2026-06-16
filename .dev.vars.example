@@ -1,0 +1,5 @@
+# Worker local development values for `wrangler dev`.
+# Copy to `.dev.vars` and fill secrets locally.
+
+WORKER_INTERNAL_API_TOKEN=
+AI_MODEL=@cf/google/gemma-4-26b-a4b-it
