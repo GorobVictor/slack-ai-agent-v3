@@ -18,18 +18,18 @@ flowchart LR
   listener -->|"POST /slack/events"| worker["Cloudflare Worker"]
   worker --> history["D1 slack_messages"]
   worker -->|"processingIntent = invoke"| think["SlackThinkAgent"]
-  think --> worker
+  think -->|"final text or streamed deltas"| worker
   worker -->|"enqueue after reply"| queue["Cloudflare Queue"]
   queue --> reflection["Skill reflection consumer"]
   reflection --> skills["D1 generated_skills"]
   reflection --> ledger["D1 skill_reflection_jobs"]
-  worker --> listener
-  listener -->|"chat.postMessage"| slackApi["Slack Web API"]
+  worker -->|"JSON or NDJSON"| listener
+  listener -->|"chat.*Stream or chat.postMessage"| slackApi["Slack Web API"]
   slackApi --> listener
-  listener -->|"capture posted bot reply"| worker
+  listener -->|"capture bot reply"| worker
 ```
 
-The key design rule is that the listener is a thin Slack bridge and the Worker is the application boundary. The listener can normalize Slack messages, decide whether a message should be captured or should invoke the agent, send a normalized event to the Worker, post a Worker reply back to Slack, and capture that posted bot reply. The listener must not run AI logic, call Workers AI, read or write D1, access Durable Object storage, execute Think tools, or store long-term memory.
+The key design rule is that the listener is a thin Slack bridge and the Worker is the application boundary. The listener can normalize Slack messages, decide whether a message should be captured or should invoke the agent, send a normalized event to the Worker, stream or post a Worker reply back to Slack, and capture that bot reply. The listener must not run AI logic, call Workers AI, read or write D1, access Durable Object storage, execute Think tools, or store long-term memory.
 
 ## Quick Start
 
@@ -155,12 +155,13 @@ Important files:
 | --- | --- |
 | `src/modules/slack-listener/slack-event-normalizer.ts` | Converts raw Slack event payloads into normalized message events. |
 | `src/modules/slack-listener/slack-event-filter.ts` | Decides `processingIntent` and filters unsupported Slack events. |
-| `src/modules/slack-listener/slack-listener.use-case.ts` | Orchestrates listener-side forwarding, Slack reply posting, and bot reply capture. |
-| `src/modules/slack/slack.handler.ts` | Validates Worker Slack event requests and maps use case results to HTTP responses. |
+| `src/modules/slack-listener/slack-listener.use-case.ts` | Orchestrates listener-side forwarding, Slack reply streaming or posting, and bot reply capture. |
+| `src/modules/slack/slack.handler.ts` | Validates Worker Slack event requests and maps use case results to JSON or NDJSON HTTP responses. |
 | `src/modules/slack/handle-slack-message.use-case.ts` | Saves Slack history, handles duplicate events, invokes Think, and enqueues reflection. |
 | `src/modules/slack/slack-session-resolver.ts` | Maps Slack context to deterministic Think session ids. |
 | `src/modules/slack/slack-history-summary.use-case.ts` | Builds Slack history context for the Think tool. |
 | `src/modules/agent/think-agent.ts` | Durable Think agent class and Slack turn execution. |
+| `src/modules/agent/think-stream.ts` | Extracts text deltas from Think stream chunks. |
 | `src/modules/agent/agent.tools.ts` | Think tool definitions. |
 | `src/modules/agent/agent.skills.ts` | Loads generated skill sources for Think. |
 | `src/modules/agent/generated-skill-source.ts` | Converts D1-backed generated skills into runtime skill sources. |
@@ -195,8 +196,8 @@ flowchart TD
   slack -->|"onMessage()"| useCase
   useCase --> normalizer["normalizeSlackMessageEvent()"]
   useCase --> filter["decideSlackEventHandling()"]
-  useCase --> workerClient
-  useCase -->|"when Worker returns reply"| slack
+  useCase -->|"capture JSON or invoke NDJSON"| workerClient
+  useCase -->|"stream or post reply"| slack
 ```
 
 Listener-side behavior:
@@ -206,9 +207,10 @@ Listener-side behavior:
 3. The listener normalizes the event into `NormalizedSlackMessageEvent`.
 4. Unsupported events are ignored.
 5. Supported events are assigned `processingIntent: "capture"` or `processingIntent: "invoke"`.
-6. The listener sends the event to `POST /slack/events`.
-7. If the Worker returns `status: "reply"`, the listener posts the text to Slack.
-8. After Slack accepts the reply and returns a timestamp, the listener sends a second Worker event for bot reply capture with `processingIntent: "capture"`.
+6. The listener sends capture-only events to `POST /slack/events` with the JSON response path.
+7. For invoke events, the listener requests `application/x-ndjson`, starts a Slack stream on the first text delta, appends subsequent deltas, and stops the stream with the final reply text.
+8. If a non-streaming reply path is used, the listener posts the final text with `chat.postMessage`.
+9. After Slack accepts the streamed or posted reply and returns a timestamp, the listener sends a second Worker event for bot reply capture with `processingIntent: "capture"`.
 
 The tracked thread store currently belongs to listener-side metadata only. Tracked thread replies without a fresh bot mention must not invoke Think.
 
@@ -227,7 +229,7 @@ The listener forwards bot-visible Slack messages to the Worker with a processing
 | Posted bot reply captured by the listener | `capture` | Save history only. |
 | Message edits and deletes | ignored | Not stored and not sent to Think. |
 | Hidden Slack events | ignored | Not stored and not sent to Think. |
-| Bot-authored Slack events from Socket Mode | ignored | Avoids loops; posted bot replies are captured explicitly after `chat.postMessage`. |
+| Bot-authored Slack events from Socket Mode | ignored | Avoids loops; bot replies are captured explicitly after Slack accepts the streamed or posted reply. |
 | File share events with files or attachments | captured or invoked according to normal mention rules | Metadata may be retained; file bytes are not stored. |
 
 MPIM is treated as channel-like in the current version: the bot captures messages it can see, but only invokes on a direct mention.
@@ -241,14 +243,17 @@ flowchart TD
   request["POST /slack/events"] --> handler["handleSlackEventRequest()"]
   handler --> auth["Bearer WORKER_INTERNAL_API_TOKEN"]
   handler --> parse["parseNormalizedSlackMessageEvent()"]
-  parse --> useCase["HandleSlackMessageUseCase.execute()"]
+  parse --> responseMode{"Accept: application/x-ndjson?"}
+  responseMode -->|"no"| useCase["HandleSlackMessageUseCase.execute()"]
+  responseMode -->|"yes"| streamUseCase["HandleSlackMessageUseCase.executeStream()"]
   useCase --> save["SlackMessageHistoryPort.saveMessage()"]
+  streamUseCase --> save
   save --> duplicate{"duplicate?"}
   duplicate -->|"yes"| noReplyDup["no_reply: duplicate_message"]
   duplicate -->|"no"| intent{"processingIntent"}
   intent -->|"capture"| noReplyCapture["no_reply: capture_only"]
   intent -->|"invoke"| session["resolveSlackSessionId()"]
-  session --> think["ThinkSessionPort.submitSlackMessage()"]
+  session --> think["ThinkSessionPort.submitSlackMessage() or streamSlackMessage()"]
   think --> reply{"non-empty reply?"}
   reply -->|"yes"| enqueue["SkillReflectionQueuePort.enqueue()"]
   reply -->|"no"| noReplyEmpty["no_reply: empty_agent_reply"]
@@ -258,6 +263,7 @@ Worker rules:
 
 - Validate the internal bearer token before parsing business input.
 - Validate the request body with module-owned validation.
+- Return NDJSON stream events for requests that accept `application/x-ndjson`.
 - Save Slack history before deciding whether to invoke Think.
 - Return `no_reply` for duplicate events.
 - Return `no_reply` for capture-only events.
@@ -271,7 +277,7 @@ The Think agent class is `SlackThinkAgent` in `src/modules/agent/think-agent.ts`
 
 ```mermaid
 flowchart TD
-  adapter["ThinkSessionAdapter.submitSlackMessage()"] --> agent["SlackThinkAgent.runSlackTurn()"]
+  adapter["ThinkSessionAdapter.submitSlackMessage() or streamSlackMessage()"] --> agent["SlackThinkAgent.runSlackTurn() or runSlackTurnStream()"]
   agent --> cachedReply["readCachedSlackTurnReply()"]
   cachedReply --> cached{"cached by idempotency key?"}
   cached -->|"yes"| returnCached["return cached text"]
@@ -279,6 +285,7 @@ flowchart TD
   model --> tools["Think tools and generated skills"]
   tools --> historyTool["getSlackHistoryContext"]
   historyTool --> historyUseCase["BuildSlackHistoryContextUseCase"]
+  model -->|"StreamCallback text deltas when streaming"| streamDelta["Worker NDJSON delta events"]
   model --> assistantText["extractLatestAssistantText()"]
   assistantText --> cache["cacheSlackTurnReply()"]
   cache --> result["return Worker reply text"]
@@ -293,6 +300,7 @@ flowchart TD
 - `getTools()` to expose typed tools.
 - D1-backed generated skill sources through `createSlackAgentSkillSources()`.
 - Think SQLite storage to cache Slack turn replies by idempotency key.
+- Think `StreamCallback` text chunks for streamed Slack invoke turns.
 
 The default model values are configured in `wrangler.jsonc`:
 
@@ -316,7 +324,7 @@ Captured history includes:
 - Private channel messages only when the bot is a member.
 - MPIM messages visible to the bot.
 - Thread replies visible to the bot.
-- Bot replies after Slack accepts `chat.postMessage` and returns a Slack message timestamp.
+- Bot replies after Slack accepts a streamed or posted reply and returns a Slack message timestamp.
 
 Captured history does not currently include:
 

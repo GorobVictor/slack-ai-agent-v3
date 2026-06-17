@@ -117,8 +117,8 @@ Listener responsibilities:
 - Decide whether an event should be ignored, captured, or used to invoke Think.
 - Build and preserve idempotency metadata.
 - Send normalized events to the Worker.
-- Post Worker replies to Slack through `SlackMessengerPort`.
-- Capture posted bot replies after Slack returns a timestamp.
+- Stream or post Worker replies to Slack through `SlackMessengerPort`.
+- Capture bot replies after Slack returns a timestamp.
 - Log operational errors.
 
 Listener non-responsibilities:
@@ -159,7 +159,7 @@ Current behavior:
 - Message deletes are ignored.
 - Hidden Slack events are ignored.
 - Bot-authored Socket Mode events are ignored to avoid loops.
-- Posted bot replies are captured explicitly after `chat.postMessage` returns a timestamp.
+- Bot replies are captured explicitly after Slack accepts a streamed or posted reply and returns a timestamp.
 - File/share events may be retained when they include files or attachments, but file bytes are not stored.
 
 When changing this behavior, update or add tests in:
@@ -206,6 +206,7 @@ Worker responsibilities:
 - Compose adapters from Cloudflare `env`.
 - Save Slack history before deciding whether to invoke Think.
 - Invoke Think only when `processingIntent === "invoke"`.
+- Return NDJSON stream events for invoke requests that accept `application/x-ndjson`.
 - Return `no_reply` for capture-only events.
 - Return `no_reply` for duplicate messages.
 - Enqueue skill reflection after successful invoked turns with non-empty replies.
@@ -238,6 +239,7 @@ Think responsibilities:
 - Conversation state.
 - Tool calling.
 - Generated skill loading.
+- Streamed text deltas for Slack invoke turns.
 - Slack turn reply caching.
 - Model invocation through the configured Workers AI model.
 
@@ -262,6 +264,7 @@ Important Think files:
 - `src/modules/agent/generated-skill-source.ts`.
 - `src/modules/agent/agent-model.ts`.
 - `src/modules/agent/agent-ai-gateway.ts`.
+- `src/modules/agent/think-stream.ts`.
 - `src/prompts/agent.prompts.ts`.
 - `src/prompts/agent-tools.prompts.ts`.
 
@@ -308,7 +311,7 @@ Captured history includes:
 - Private channels only when the bot is a member.
 - MPIM messages visible to the bot.
 - Thread replies visible to the bot.
-- Bot replies after Slack accepts the posted reply.
+- Bot replies after Slack accepts the streamed or posted reply.
 
 Captured history does not currently include:
 
@@ -330,12 +333,13 @@ The agent should call `getSlackHistoryContext` before summarizing recent Slack d
 
 ## Bot Reply Capture
 
-Worker replies are posted to Slack by the listener, not by the Worker.
+Worker replies are streamed or posted to Slack by the listener, not by the Worker.
 
 Required behavior:
 
 - `SlackMessengerPort.sendMessage()` returns the posted Slack message timestamp.
-- After Slack accepts the post, the listener sends a second Worker event for the bot reply.
+- For streamed invoke replies, `SlackMessengerPort.startStream()`, `appendStream()`, and `stopStream()` map to Slack `chat.*Stream` APIs.
+- After Slack accepts a streamed or posted reply, the listener sends a second Worker event for the bot reply.
 - Bot reply capture uses `processingIntent: "capture"`.
 - Bot reply capture uses `userId = botUserId`.
 - Bot reply capture must not invoke Think.
