@@ -65,6 +65,10 @@ const skillReflectionDecisionSchema = z.discriminatedUnion("action", [
   }),
 ]);
 
+export const SKILL_REFLECTION_HISTORY_DAYS = 3;
+export const SKILL_REFLECTION_HISTORY_LIMIT = 50;
+export const SKILL_REFLECTION_MAX_OUTPUT_TOKENS = 800;
+
 export type SkillReflectionInput = {
   event: SlackWorkerRequest;
   assistantReply: string;
@@ -95,12 +99,15 @@ export type SkillReflectionUseCaseOptions = {
   generateCandidate: SkillReflectionCandidateGenerator;
   logger?: LoggerPort;
   throwOnError?: boolean;
+  modelName?: string;
 };
 
 export class ReflectOnSlackConversationForSkillUseCase {
   constructor(private readonly options: SkillReflectionUseCaseOptions) {}
 
   async execute(input: SkillReflectionInput): Promise<SkillReflectionResult> {
+    const startedAt = Date.now();
+
     try {
       this.options.logger?.info("[gen-skills] Skill reflection started", {
         teamId: input.event.teamId,
@@ -108,6 +115,10 @@ export class ReflectOnSlackConversationForSkillUseCase {
         threadTs: input.event.threadTs,
         messageTs: input.event.messageTs,
         channelType: input.event.channelType,
+        idempotencyKey: input.event.idempotencyKey,
+        modelName: this.options.modelName,
+        historyDays: SKILL_REFLECTION_HISTORY_DAYS,
+        historyLimit: SKILL_REFLECTION_HISTORY_LIMIT,
       });
 
       const historyContext = await new BuildSlackHistoryContextUseCase(
@@ -115,11 +126,13 @@ export class ReflectOnSlackConversationForSkillUseCase {
       ).execute({
         currentEvent: input.event,
         scope: resolveReflectionHistoryScope(input.event),
-        days: 14,
+        days: SKILL_REFLECTION_HISTORY_DAYS,
+        limit: SKILL_REFLECTION_HISTORY_LIMIT,
         threadTs: input.event.threadTs ?? input.event.messageTs,
       });
 
       this.options.logger?.info("[gen-skills] Reflection context loaded", {
+        modelName: this.options.modelName,
         historyContextLength: historyContext.length,
       });
 
@@ -127,16 +140,23 @@ export class ReflectOnSlackConversationForSkillUseCase {
       const existingSkillsCatalog = buildExistingSkillsCatalogPrompt(existingSkills);
 
       this.options.logger?.info("[gen-skills] Existing skill catalog loaded", {
+        modelName: this.options.modelName,
         existingSkillCount: existingSkills.length,
+        existingSkillsCatalogLength: existingSkillsCatalog.length,
       });
 
+      const modelStartedAt = Date.now();
       const decision = await this.options.generateCandidate({
         ...input,
         historyContext,
         existingSkillsCatalog,
       });
+      const modelElapsedMs = Date.now() - modelStartedAt;
 
       this.options.logger?.info("[gen-skills] Skill decision generated", {
+        modelName: this.options.modelName,
+        modelElapsedMs,
+        totalElapsedMs: Date.now() - startedAt,
         action: decision.action,
         name: readDecisionName(decision),
         existingSkillName: decision.action === "update" ? decision.existingSkillName : undefined,
@@ -149,6 +169,7 @@ export class ReflectOnSlackConversationForSkillUseCase {
 
       if (policyResult.status === "rejected") {
         this.options.logger?.info("[gen-skills] Skill candidate rejected", {
+          modelName: this.options.modelName,
           action: decision.action,
           name: readDecisionName(decision),
           confidence: readDecisionConfidence(decision),
@@ -178,6 +199,8 @@ export class ReflectOnSlackConversationForSkillUseCase {
       }
 
       this.options.logger?.info("[gen-skills] Skill reflection saved", {
+        modelName: this.options.modelName,
+        totalElapsedMs: Date.now() - startedAt,
         status: saveResult.status === "inserted" ? "created" : saveResult.status,
         name: saveResult.skill.name,
         version: saveResult.skill.version,
@@ -190,13 +213,15 @@ export class ReflectOnSlackConversationForSkillUseCase {
         name: saveResult.skill.name,
       };
     } catch (error) {
+      this.options.logger?.warn("[gen-skills] Skill reflection failed", {
+        modelName: this.options.modelName,
+        totalElapsedMs: Date.now() - startedAt,
+        reason: error instanceof Error ? error.message : "Skill reflection failed.",
+      });
+
       if (this.options.throwOnError) {
         throw error;
       }
-
-      this.options.logger?.warn("[gen-skills] Skill reflection failed", {
-        reason: error instanceof Error ? error.message : "Skill reflection failed.",
-      });
 
       return {
         status: "skipped",
@@ -212,6 +237,7 @@ export function createModelSkillReflectionCandidateGenerator(
   return async (input) => {
     const result = await generateText({
       model,
+      maxOutputTokens: SKILL_REFLECTION_MAX_OUTPUT_TOKENS,
       output: Output.object({
         schema: skillReflectionDecisionSchema,
         name: SKILL_REFLECTION_OUTPUT_NAME,

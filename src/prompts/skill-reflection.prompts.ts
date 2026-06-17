@@ -52,6 +52,7 @@ export function buildSkillReflectionPrompt(input: {
     input.existingSkillsCatalog,
     "",
     "Return action skip unless there is a clear reusable pattern for future user requests.",
+    "For skip, return only a concise reason and confidence.",
     "Use action update with existingSkillName if an existing skill should be improved.",
     "Use action create only for genuinely new reusable workflows.",
     'For create/update, write `name` in lowercase kebab-case and include "Use when" in `description`.',

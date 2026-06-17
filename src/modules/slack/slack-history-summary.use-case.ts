@@ -15,6 +15,7 @@ export type BuildSlackHistoryContextInput = {
   scope: SlackHistorySummaryScope;
   days: number;
   threadTs?: string;
+  limit?: number;
 };
 
 export class BuildSlackHistoryContextUseCase {
@@ -27,7 +28,7 @@ export class BuildSlackHistoryContextUseCase {
       channelId: input.currentEvent.channelId,
       sinceTs: range.sinceTs,
       untilTs: range.untilTs,
-      limit: 500,
+      limit: readHistoryLimit(input.limit),
     };
     const messages =
       input.scope === "thread"
@@ -76,4 +77,8 @@ function buildSlackTimeRange(messageTs: string, days: number): { sinceTs: string
     sinceTs: (safeUntil - safeDays * 86_400).toFixed(6),
     untilTs: safeUntil.toFixed(6),
   };
+}
+
+function readHistoryLimit(limit: number | undefined): number {
+  return Math.max(1, Math.min(Math.floor(limit ?? 500), 1_000));
 }

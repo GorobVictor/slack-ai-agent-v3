@@ -3,9 +3,16 @@ import { describe, expect, it } from "vitest";
 import { InMemoryGeneratedSkillAdapter } from "../../adapters/storage/in-memory-generated-skill.adapter.js";
 import { InMemorySlackMessageHistoryAdapter } from "../../adapters/storage/in-memory-slack-message-history.adapter.js";
 import type { GeneratedSkill } from "../../ports/generated-skill.port.js";
+import type {
+  SlackMessageHistoryPort,
+  SlackThreadHistoryTimeRange,
+} from "../../ports/slack-message-history.port.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import type { SkillReflectionDecision } from "./generated-skill-policy.js";
-import { ReflectOnSlackConversationForSkillUseCase } from "./skill-reflection.use-case.js";
+import {
+  ReflectOnSlackConversationForSkillUseCase,
+  SKILL_REFLECTION_HISTORY_LIMIT,
+} from "./skill-reflection.use-case.js";
 
 describe("ReflectOnSlackConversationForSkillUseCase", () => {
   it("stores a create decision as version 1", async () => {
@@ -80,6 +87,74 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
 
     expect(catalog).toContain("name: summarize-recurring-blockers");
     expect(catalog).toContain("version: 1");
+  });
+
+  it("uses the reduced reflection history limit", async () => {
+    let query: SlackThreadHistoryTimeRange | null = null;
+    const currentEvent = event();
+
+    await new ReflectOnSlackConversationForSkillUseCase({
+      history: {
+        async saveMessage() {
+          return { status: "inserted" };
+        },
+        async findMessagesByChannelAndTimeRange() {
+          return [];
+        },
+        async findMessagesByThreadAndTimeRange(input) {
+          query = input;
+          return [];
+        },
+        async findThreadMessagesByChannelAndTimeRange() {
+          return [];
+        },
+      } satisfies SlackMessageHistoryPort,
+      skills: new InMemoryGeneratedSkillAdapter(),
+      generateCandidate: async () => ({
+        action: "skip",
+        confidence: 0.9,
+        reason: "No reusable pattern.",
+      }),
+    }).execute({
+      event: currentEvent,
+      assistantReply: "Done.",
+    });
+
+    const capturedQuery = query as SlackThreadHistoryTimeRange | null;
+
+    expect(capturedQuery).toMatchObject({
+      limit: SKILL_REFLECTION_HISTORY_LIMIT,
+      threadTs: currentEvent.messageTs,
+    });
+    expect(capturedQuery?.sinceTs).toBe("1709740800.000200");
+  });
+
+  it("still sends greeting-only turns to the candidate generator", async () => {
+    const history = new InMemorySlackMessageHistoryAdapter();
+    const skills = new InMemoryGeneratedSkillAdapter();
+    const currentEvent = event({
+      text: "<@U0B54L53T5H> hey man",
+    });
+    await history.saveMessage(currentEvent);
+    let called = false;
+
+    await new ReflectOnSlackConversationForSkillUseCase({
+      history,
+      skills,
+      generateCandidate: async () => {
+        called = true;
+        return {
+          action: "skip",
+          confidence: 0.99,
+          reason: "Greeting only.",
+        };
+      },
+    }).execute({
+      event: currentEvent,
+      assistantReply: "Hey! How can I help you?",
+    });
+
+    expect(called).toBe(true);
   });
 
   it("skips weak decisions", async () => {

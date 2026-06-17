@@ -17,6 +17,7 @@ export type RunSkillReflectionJobOptions = {
   skills: GeneratedSkillPort;
   ledger: SkillReflectionJobLedgerPort;
   model: LanguageModel;
+  modelName?: string;
   logger?: LoggerPort;
 };
 
@@ -49,6 +50,7 @@ export async function runSkillReflectionJob(
       generateCandidate: createModelSkillReflectionCandidateGenerator(options.model),
       logger: options.logger,
       throwOnError: true,
+      modelName: options.modelName,
     }).execute({
       event: options.job.event,
       assistantReply: options.job.assistantReply,
@@ -58,6 +60,7 @@ export async function runSkillReflectionJob(
 
     options.logger?.info("[gen-skills] Skill reflection job completed", {
       idempotencyKey: options.job.idempotencyKey,
+      modelName: options.modelName,
       resultStatus: result.status,
       resultName: "name" in result ? result.name : undefined,
     });
