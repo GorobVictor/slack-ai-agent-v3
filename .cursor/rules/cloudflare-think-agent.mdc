@@ -155,7 +155,6 @@ src/
       agent.use-case.ts
       agent.tools.ts
       agent.memory.ts
-      agent.prompts.ts
       agent.types.ts
 
     slack/
@@ -222,6 +221,13 @@ src/
     json.tool.ts
     retry.tool.ts
     text.tool.ts
+
+  prompts/
+    agent.prompts.ts
+    agent-tools.prompts.ts
+    skill-reflection.prompts.ts
+    slack-history.prompts.ts
+    generated-skills.prompts.ts
 ```
 
 For the separate Node.js Slack listener, prefer:
@@ -311,10 +317,11 @@ Think tools should be defined in:
 src/modules/agent/agent.tools.ts
 ```
 
-Think prompts should be placed close to the agent module:
+Think prompts and model-facing text should live in the centralized prompts folder:
 
 ```txt
-src/modules/agent/agent.prompts.ts
+src/prompts/agent.prompts.ts
+src/prompts/skill-reflection.prompts.ts
 ```
 
 Do not put a large system prompt inside `src/index.ts`.
@@ -797,13 +804,16 @@ export class HandleSlackMessageUseCase {
 
 # Prompt Engineering Rules
 
-Store prompts close to the module that owns them.
+Store prompts and model-facing text in the centralized prompts folder.
 
 Preferred:
 
 ```txt
-src/modules/agent/agent.prompts.ts
-src/modules/agent/prompts/build-agent-system-prompt.ts
+src/prompts/agent.prompts.ts
+src/prompts/agent-tools.prompts.ts
+src/prompts/skill-reflection.prompts.ts
+src/prompts/slack-history.prompts.ts
+src/prompts/generated-skills.prompts.ts
 ```
 
 Bad:
@@ -817,7 +827,7 @@ Prompts should be:
 * versionable
 * readable
 * easy to test
-* close to agent logic
+* easy to find in `src/prompts/`
 * not duplicated across handlers/tools
 
 Prefer structured prompt builders over hardcoded inline prompts.

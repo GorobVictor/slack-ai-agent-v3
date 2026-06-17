@@ -335,6 +335,7 @@ src/
     slack/
     slack-listener/
   ports/
+  prompts/
   shared/
   tools/
 migrations/
@@ -352,6 +353,9 @@ Important files:
 - `src/modules/agent/think-agent.ts`
 - `src/modules/agent/skill-reflection.use-case.ts`
 - `src/modules/agent/generated-skill-body.ts`
+- `src/prompts/agent.prompts.ts`
+- `src/prompts/skill-reflection.prompts.ts`
+- `src/prompts/generated-skills.prompts.ts`
 - `src/adapters/storage/d1-slack-message-history.adapter.ts`
 - `src/adapters/storage/d1-generated-skill.adapter.ts`
 - `migrations/0001_slack_messages.sql`

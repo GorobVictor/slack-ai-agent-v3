@@ -90,7 +90,7 @@ Important behavior:
 - The Think agent class lives in `src/modules/agent/think-agent.ts`.
 - Think-specific adapters live under `src/adapters/think/`.
 - Keep `@cloudflare/think` imports in Think-specific files only.
-- Prompts belong near the agent module, such as `src/modules/agent/agent.prompts.ts`.
+- Prompts and model-facing text live in `src/prompts/` with `Used by` comments.
 - Tools exposed to Think should be small, typed, and validated with schemas.
 - Think tools must call use cases and ports, not storage or Slack APIs directly.
 - Do not manually build a custom LLM loop unless the user explicitly asks for it.
@@ -284,6 +284,8 @@ If the project has an active local `wrangler dev`, remember that local D1 state 
 - Use the next sequential feature number.
 - Use the date format `YYYY-MM-DD`.
 - Use a short lowercase kebab-case feature name.
+- Preserve the complete final approved plan content, including all sections, steps, diagrams, code snippets, commands, checklists, tables, risks, acceptance criteria, and references.
+- Do not summarize, shorten, omit, or rewrite substantive plan content except for translating repository content to English.
 - Repository feature docs must be written in English.
 - Do not edit `.cursor/plans/*` plan files unless explicitly instructed.
 

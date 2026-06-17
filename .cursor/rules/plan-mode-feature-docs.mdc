@@ -9,6 +9,9 @@ alwaysApply: true
 - Use a zero-padded sequential `{index}` if existing feature documents already use one; otherwise use the next plain integer.
 - Use `{date}` in `YYYY-MM-DD` format.
 - Use a short lowercase kebab-case `{feature}` name that describes the work.
+- Preserve the complete final approved plan content in the saved feature document.
+- Include all plan sections, implementation steps, acceptance criteria, risks, diagrams, code snippets, commands, checklists, tables, and references that were part of the final approved plan.
+- Do not summarize, shorten, omit, or rewrite substantive plan content except for the required translation to English.
 - Write saved feature documents in English because they are repository content.
 - If the chat plan was created in another language, translate it to English before saving it under `proto/features/`.
-- Keep file paths, identifiers, and code references unchanged during translation.
+- Keep file paths, identifiers, code blocks, diagrams, commands, and code references unchanged during translation unless the surrounding explanatory text itself needs translation.
