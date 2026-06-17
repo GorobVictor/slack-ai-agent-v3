@@ -41,6 +41,7 @@ describe("skill reflection prompts", () => {
     expect(prompt).toContain("name: summarize-recurring-blockers");
     expect(prompt).toContain("Return compact JSON only");
     expect(prompt).toContain("at most 5 items");
+    expect(prompt).toContain("set candidate.name exactly to that existing skill name");
   });
 
   it("formats the existing generated skill catalog", () => {

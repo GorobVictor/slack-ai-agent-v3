@@ -43,7 +43,6 @@ export type SaveAutoApprovedSkillDecisionInput =
     }
   | {
       action: "update";
-      existingSkillName: string;
       candidate: AutoApprovedGeneratedSkillCandidate;
     };
 

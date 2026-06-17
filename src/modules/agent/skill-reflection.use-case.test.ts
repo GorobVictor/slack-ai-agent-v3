@@ -18,7 +18,7 @@ import {
 
 describe("ReflectOnSlackConversationForSkillUseCase", () => {
   it("uses a larger bounded output budget for structured create and update decisions", () => {
-    expect(SKILL_REFLECTION_MAX_OUTPUT_TOKENS).toBe(2_000);
+    expect(SKILL_REFLECTION_MAX_OUTPUT_TOKENS).toBe(5_000);
   });
 
   it("normalizes flat create decisions and falls back to the top-level reason", () => {
@@ -60,7 +60,6 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
     expect(
       normalizeModelSkillReflectionDecision({
         action: "update",
-        existingSkillName: "minimal-code-only-response",
         reason: "Refines code-only behavior.",
         confidence: 0.96,
         candidate: {
@@ -78,8 +77,8 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
       }),
     ).toMatchObject({
       action: "update",
-      existingSkillName: "minimal-code-only-response",
       candidate: {
+        name: "minimal-code-only-response",
         reason: "Candidate-specific reason.",
       },
     });
@@ -101,23 +100,12 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
     expect(
       normalizeModelSkillReflectionDecision({
         action: "update",
-        reason: "Missing existing skill name.",
+        reason: "Missing candidate.",
         confidence: 0.9,
-        candidate: {
-          name: "minimal-code-only-response",
-          description:
-            "Provide code-only answers without extra explanation. Use when users ask for code-only responses.",
-          body: {
-            goal: "Provide code-only answers without extra explanation.",
-            triggers: ["Use when users ask for code-only responses."],
-            instructions: ["Return only the requested code."],
-          },
-          confidence: 0.9,
-        },
       }),
     ).toEqual({
       action: "skip",
-      reason: "Skill reflection returned update without existingSkillName.",
+      reason: "Skill reflection returned update without a candidate.",
       confidence: 0,
     });
   });
@@ -361,7 +349,6 @@ function updateDecision(): SkillReflectionDecision {
 
   return {
     action: "update",
-    existingSkillName: "summarize-recurring-blockers",
     candidate: {
       ...currentCandidate,
       body: {

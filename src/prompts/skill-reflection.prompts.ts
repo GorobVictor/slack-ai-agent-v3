@@ -1,6 +1,7 @@
 import type { GeneratedSkill } from "../ports/generated-skill.port.js";
 import type { SlackWorkerRequest } from "../modules/slack/slack.types.js";
 import { GENERATED_SKILL_ALLOWED_TOOL } from "./generated-skills.prompts.js";
+import { SKILL_REFLECTION_MAX_OUTPUT_TOKENS } from "../modules/agent/skill-reflection.use-case.js";
 
 /**
  * Used by:
@@ -20,6 +21,7 @@ export function buildSkillReflectionSystemPrompt(): string {
     "Do not store secrets, credentials, private facts, personal preferences, or one-off conversation details.",
     "A skill must describe future agent behavior, not summarize what happened.",
     "Return action update when an existing skill covers the same workflow and the new candidate meaningfully improves it.",
+    "For update, set candidate.name exactly to the existing skill name from the catalog.",
     "Return action create only when no existing skill covers the reusable workflow.",
     "Return action skip when an existing skill already covers the workflow without meaningful improvement.",
     "The skill name must be lowercase kebab-case, never snake_case or title case.",
@@ -29,6 +31,7 @@ export function buildSkillReflectionSystemPrompt(): string {
     "For create/update, use at most 3 triggers, 5 instructions, and 3 safety notes.",
     "Keep reason, goal, triggers, and instructions concise.",
     "If the pattern is weak, narrow, private, user-specific, or one-off, return action skip.",
+    `You have to fit into ${SKILL_REFLECTION_MAX_OUTPUT_TOKENS} tokens.`,
     `Allowed tools for generated skills are limited to ${GENERATED_SKILL_ALLOWED_TOOL}.`,
   ].join("\n");
 }
@@ -56,7 +59,7 @@ export function buildSkillReflectionPrompt(input: {
     "",
     "Return action skip unless there is a clear reusable pattern for future user requests.",
     "For skip, return only a concise reason and confidence.",
-    "Use action update with existingSkillName if an existing skill should be improved.",
+    "Use action update only when improving an existing skill; set candidate.name exactly to that existing skill name.",
     "Use action create only for genuinely new reusable workflows.",
     'For create/update, write `name` in lowercase kebab-case and include "Use when" in `description`.',
     "For create/update, fill body.goal, body.triggers, body.instructions, optional body.safetyNotes, and optional body.toolUsage.",

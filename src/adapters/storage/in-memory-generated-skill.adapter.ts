@@ -18,10 +18,7 @@ export class InMemoryGeneratedSkillAdapter implements GeneratedSkillPort {
   async saveAutoApprovedSkillDecision(
     input: SaveAutoApprovedSkillDecisionInput,
   ): Promise<SaveAutoApprovedSkillDecisionResult> {
-    const current =
-      input.action === "update"
-        ? await this.findSkillByName(input.existingSkillName)
-        : await this.findSkillByName(input.candidate.name);
+    const current = await this.findSkillByName(input.candidate.name);
 
     if (current?.disabled) {
       return {

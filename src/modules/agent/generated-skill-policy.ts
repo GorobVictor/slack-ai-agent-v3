@@ -32,7 +32,6 @@ export type SkillReflectionDecision =
     }
   | {
       action: "update";
-      existingSkillName: string;
       candidate: TypedGeneratedSkillCandidate;
     };
 
@@ -100,13 +99,6 @@ export function validateGeneratedSkillCandidate(
     };
   }
 
-  if (decision.action === "update" && !normalizeSkillName(decision.existingSkillName)) {
-    return {
-      status: "rejected",
-      reason: "Update decisions must include an existing skill name.",
-    };
-  }
-
   const bodyValidationError = validateSkillBody(bodyJson);
 
   if (bodyValidationError) {
@@ -160,7 +152,6 @@ export function validateGeneratedSkillCandidate(
       status: "approved",
       decision: {
         action: "update",
-        existingSkillName: normalizeSkillName(decision.existingSkillName),
         candidate: approvedCandidate,
       },
     };

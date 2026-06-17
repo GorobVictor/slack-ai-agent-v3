@@ -45,7 +45,6 @@ describe("D1GeneratedSkillAdapter", () => {
     await expect(
       adapter.saveAutoApprovedSkillDecision({
         action: "update",
-        existingSkillName: "summarize-recurring-blockers",
         candidate: {
           ...decision.candidate,
           body: {

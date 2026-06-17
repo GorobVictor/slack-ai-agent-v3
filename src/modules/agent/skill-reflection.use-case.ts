@@ -52,7 +52,6 @@ const skillReflectionDecisionSchema = z.object({
   action: z.enum(["skip", "create", "update"]),
   reason: z.string(),
   confidence: z.number().min(0).max(1),
-  existingSkillName: z.string().optional(),
   candidate: typedSkillCandidateSchema.optional(),
 });
 
@@ -60,7 +59,7 @@ type ModelSkillReflectionDecision = z.infer<typeof skillReflectionDecisionSchema
 
 export const SKILL_REFLECTION_HISTORY_DAYS = 3;
 export const SKILL_REFLECTION_HISTORY_LIMIT = 50;
-export const SKILL_REFLECTION_MAX_OUTPUT_TOKENS = 2_000;
+export const SKILL_REFLECTION_MAX_OUTPUT_TOKENS = 5_000;
 
 export type SkillReflectionInput = {
   event: SlackWorkerRequest;
@@ -152,7 +151,6 @@ export class ReflectOnSlackConversationForSkillUseCase {
         totalElapsedMs: Date.now() - startedAt,
         action: decision.action,
         name: readDecisionName(decision),
-        existingSkillName: decision.action === "update" ? decision.existingSkillName : undefined,
         confidence: readDecisionConfidence(decision),
         allowedTools: readDecisionAllowedTools(decision),
         bodyJsonLength: readDecisionBodyLength(decision),
@@ -270,19 +268,8 @@ export function normalizeModelSkillReflectionDecision(
   };
 
   if (decision.action === "update") {
-    const existingSkillName = decision.existingSkillName?.trim();
-
-    if (!existingSkillName) {
-      return {
-        action: "skip",
-        reason: "Skill reflection returned update without existingSkillName.",
-        confidence: 0,
-      };
-    }
-
     return {
       action: "update",
-      existingSkillName,
       candidate,
     };
   }
