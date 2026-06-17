@@ -60,7 +60,7 @@ export class SlackSocketModeAdapter implements SlackSocketPort, SlackMessengerPo
   async sendMessage(input: SendSlackMessageInput): Promise<SendSlackMessageResult> {
     const response = await this.app.client.chat.postMessage({
       channel: input.channelId,
-      text: input.text,
+      markdown_text: input.text,
       thread_ts: input.threadTs,
     });
 
