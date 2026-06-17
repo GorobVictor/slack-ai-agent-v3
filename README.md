@@ -1,241 +1,445 @@
 # Slack AI Agent v3
 
-Slack AI Agent v3 is a Slack assistant built from a thin Node.js Slack Socket Mode listener, a Cloudflare Worker application boundary, and a durable `@cloudflare/think` agent. The listener owns Slack WebSocket and Slack Web API integration. The Worker owns validation, history capture, session routing, and Think orchestration. D1 stores passive Slack history so the agent can summarize thread and channel context, and auto-approved generated skills so the agent can reuse learned workflows.
+Slack AI Agent v3 is a Slack assistant built around a deliberately split runtime:
 
-## Runtime Architecture
+```text
+Node.js Slack Listener -> Cloudflare Worker -> @cloudflare/think Agent
+```
+
+The Node.js listener owns Slack Socket Mode and Slack Web API integration. The Cloudflare Worker owns the application boundary, request validation, Slack history capture, idempotency, Think session routing, generated-skill reflection, and queue consumption. `@cloudflare/think` owns durable agent execution and conversation state. Cloudflare D1 stores passive Slack history, generated skills, generated-skill versions, and reflection job ledger entries.
+
+This repository favors feature-first modular hexagonal architecture. Entrypoints compose dependencies. Use cases implement behavior. Ports define replaceable boundaries. Adapters contain Slack SDK, Worker HTTP, D1, Cloudflare Queue, Think, Workers AI, and logging details.
+
+## Current Runtime Shape
 
 ```mermaid
 flowchart LR
-  slack["Slack Socket Mode"] --> listener["Node Listener"]
+  slack["Slack Socket Mode"] --> listener["Node.js listener"]
   listener -->|"POST /slack/events"| worker["Cloudflare Worker"]
   worker --> history["D1 slack_messages"]
-  worker -->|"invoke only"| think["SlackThinkAgent"]
+  worker -->|"processingIntent = invoke"| think["SlackThinkAgent"]
   think --> worker
-  worker -->|"enqueue reflection"| queue["Cloudflare Queue"]
+  worker -->|"enqueue after reply"| queue["Cloudflare Queue"]
   queue --> reflection["Skill reflection consumer"]
   reflection --> skills["D1 generated_skills"]
+  reflection --> ledger["D1 skill_reflection_jobs"]
   worker --> listener
   listener -->|"chat.postMessage"| slackApi["Slack Web API"]
   slackApi --> listener
-  listener -->|"capture bot reply"| worker
+  listener -->|"capture posted bot reply"| worker
 ```
 
-The code follows feature-first hexagonal architecture:
+The key design rule is that the listener is a thin Slack bridge and the Worker is the application boundary. The listener can normalize Slack messages, decide whether a message should be captured or should invoke the agent, send a normalized event to the Worker, post a Worker reply back to Slack, and capture that posted bot reply. The listener must not run AI logic, call Workers AI, read or write D1, access Durable Object storage, execute Think tools, or store long-term memory.
 
-- Entrypoints compose dependencies and route requests.
-- Use cases implement behavior.
-- Ports define replaceable boundaries.
-- Adapters contain Slack SDK, Worker HTTP, D1, Think, and logging details.
+## Quick Start
 
-## Key Entrypoints
+Install dependencies:
 
-| Runtime | Entrypoint | Command |
-| --- | --- | --- |
-| Slack listener | `src/cmd/listener/index.ts` | `npm run listener:slack` |
-| Cloudflare Worker | `src/cmd/worker/index.ts` | `npm run worker:dev` |
-| Worker deploy | `src/cmd/worker/index.ts` | `npm run worker:deploy` |
+```sh
+npm install
+```
 
-General commands:
+Create listener local environment:
+
+```sh
+cp .env.example .env
+```
+
+Create Worker local secrets:
+
+```sh
+cp .dev.vars.example .dev.vars
+```
+
+Apply local D1 migrations before running `wrangler dev`:
+
+```sh
+npx wrangler d1 migrations apply slack-ai-agent-v3-history --local
+```
+
+Run the Worker locally:
+
+```sh
+npm run worker:dev
+```
+
+Run the Slack Socket Mode listener in another terminal:
+
+```sh
+npm run listener:slack
+```
+
+For local development, `WORKER_SLACK_EVENT_URL` should usually be:
+
+```text
+http://localhost:8787/slack/events
+```
+
+Before completing TypeScript changes, run:
 
 ```sh
 npm run typecheck
 npm test
+```
+
+For Worker or Wrangler config changes, also run:
+
+```sh
 npx wrangler deploy --dry-run
 ```
 
+## Scripts
+
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Alias for the Slack listener entrypoint. |
+| `npm run listener:slack` | Run the Node.js Slack Socket Mode listener with `tsx`. |
+| `npm run worker:dev` | Run the Cloudflare Worker locally with Wrangler. |
+| `npm run worker:deploy` | Deploy the Worker with Wrangler. |
+| `npm run build` | Compile TypeScript into `dist/`. |
+| `npm run typecheck` | Typecheck without emitting files. |
+| `npm test` | Run the Vitest suite once. |
+| `npm start` | Run the built listener from `dist/`. |
+
+## Entrypoints
+
+| Runtime | Entrypoint | Main responsibility |
+| --- | --- | --- |
+| Slack listener | `src/cmd/listener/index.ts` | Load listener env, create Slack and Worker adapters, resolve bot user id, start Socket Mode. |
+| Cloudflare Worker fetch handler | `src/cmd/worker/index.ts` | Route `POST /slack/events`, compose Worker dependencies, delegate agent routes to `routeAgentRequest()`. |
+| Cloudflare Queue consumer | `src/cmd/worker/index.ts` | Consume generated-skill reflection jobs and update D1-backed skill catalog. |
+| Think agent | `src/modules/agent/think-agent.ts` | Execute durable Slack turns through `@cloudflare/think`. |
+
+## Repository Layout
+
+```text
+src/
+  cmd/
+    listener/
+      index.ts
+    worker/
+      index.ts
+  adapters/
+    cloudflare/
+      cloudflare-skill-reflection-queue.adapter.ts
+    logger/
+      console-logger.adapter.ts
+    slack/
+      slack-socket-mode.adapter.ts
+    storage/
+      d1-generated-skill.adapter.ts
+      d1-skill-reflection-job-ledger.adapter.ts
+      d1-slack-message-history.adapter.ts
+      in-memory-generated-skill.adapter.ts
+      in-memory-slack-message-history.adapter.ts
+      in-memory-tracked-thread-store.adapter.ts
+    think/
+      think-session.adapter.ts
+    worker/
+      worker-event-client.adapter.ts
+  modules/
+    agent/
+    slack/
+    slack-listener/
+  ports/
+  prompts/
+  shared/
+  tools/
+migrations/
+proto/features/
+```
+
+Important files:
+
+| File | Purpose |
+| --- | --- |
+| `src/modules/slack-listener/slack-event-normalizer.ts` | Converts raw Slack event payloads into normalized message events. |
+| `src/modules/slack-listener/slack-event-filter.ts` | Decides `processingIntent` and filters unsupported Slack events. |
+| `src/modules/slack-listener/slack-listener.use-case.ts` | Orchestrates listener-side forwarding, Slack reply posting, and bot reply capture. |
+| `src/modules/slack/slack.handler.ts` | Validates Worker Slack event requests and maps use case results to HTTP responses. |
+| `src/modules/slack/handle-slack-message.use-case.ts` | Saves Slack history, handles duplicate events, invokes Think, and enqueues reflection. |
+| `src/modules/slack/slack-session-resolver.ts` | Maps Slack context to deterministic Think session ids. |
+| `src/modules/slack/slack-history-summary.use-case.ts` | Builds Slack history context for the Think tool. |
+| `src/modules/agent/think-agent.ts` | Durable Think agent class and Slack turn execution. |
+| `src/modules/agent/agent.tools.ts` | Think tool definitions. |
+| `src/modules/agent/agent.skills.ts` | Loads generated skill sources for Think. |
+| `src/modules/agent/generated-skill-source.ts` | Converts D1-backed generated skills into runtime skill sources. |
+| `src/modules/agent/generated-skill-body.ts` | Renders typed generated skill bodies to canonical markdown. |
+| `src/modules/agent/generated-skill-policy.ts` | Validates and auto-approves or rejects generated-skill decisions. |
+| `src/modules/agent/skill-reflection.use-case.ts` | Reflects on successful Slack turns and returns `skip`, `create`, or `update`. |
+| `src/modules/agent/skill-reflection-job.ts` | Queue payload validation for reflection jobs. |
+| `src/modules/agent/skill-reflection-job-runner.ts` | Runs reflection jobs with D1 ledger idempotency. |
+| `src/modules/agent/agent-model.ts` | Creates Workers AI models for normal turns and reflection. |
+| `src/modules/agent/agent-ai-gateway.ts` | Builds Cloudflare AI Gateway URLs. |
+| `src/prompts/agent.prompts.ts` | Main Slack agent system prompt builder. |
+| `src/prompts/agent-tools.prompts.ts` | Model-facing tool prompt text. |
+| `src/prompts/slack-history.prompts.ts` | Slack history context formatting. |
+| `src/prompts/skill-reflection.prompts.ts` | Reflection prompt and structured decision instructions. |
+| `src/prompts/generated-skills.prompts.ts` | Generated skill rendering and prompt fragments. |
+| `src/shared/env.ts` | Listener environment loading and validation. |
+| `src/shared/errors.ts` | Shared application error type. |
+| `src/tools/crypto.tool.ts` | Generic crypto helper utilities. |
+| `src/tools/retry.tool.ts` | Generic retry helper utilities. |
+
 ## Listener Flow
 
-`main()` in `src/cmd/listener/index.ts` loads listener environment with `loadListenerEnv()`, creates adapters, resolves the bot user id, and wires Slack events to `SlackListenerUseCase.handleRawSlackEvent()`.
+`main()` in `src/cmd/listener/index.ts` loads environment values with `loadListenerEnv()`, creates `SlackSocketModeAdapter`, resolves the bot user id through Slack `auth.test` when `SLACK_BOT_USER_ID` is not provided, creates `WorkerEventClientAdapter`, creates an in-memory tracked thread store, and wires Slack events to `SlackListenerUseCase.handleRawSlackEvent()`.
 
 ```mermaid
 flowchart TD
-  main["main()"] --> env["loadListenerEnv()"]
-  main --> socket["new SlackSocketModeAdapter()"]
-  main --> workerClient["new WorkerEventClientAdapter()"]
-  main --> store["new InMemoryTrackedThreadStoreAdapter()"]
-  main --> useCase["new SlackListenerUseCase()"]
-  socket -->|"onMessage()"| handle["handleRawSlackEvent()"]
+  main["src/cmd/listener/index.ts"] --> env["loadListenerEnv()"]
+  main --> slack["SlackSocketModeAdapter"]
+  main --> workerClient["WorkerEventClientAdapter"]
+  main --> trackedThreads["InMemoryTrackedThreadStoreAdapter"]
+  main --> useCase["SlackListenerUseCase"]
+  slack -->|"onMessage()"| useCase
+  useCase --> normalizer["normalizeSlackMessageEvent()"]
+  useCase --> filter["decideSlackEventHandling()"]
+  useCase --> workerClient
+  useCase -->|"when Worker returns reply"| slack
 ```
 
-`SlackListenerUseCase.handleRawSlackEvent()` does the listener-side work:
+Listener-side behavior:
 
-```mermaid
-flowchart TD
-  raw["Raw Slack event"] --> normalize["normalizeSlackMessageEvent()"]
-  normalize --> decision["decideSlackEventHandling()"]
-  decision --> workerEvent["SlackWorkerRequest"]
-  workerEvent --> sendWorker["WorkerEventClientPort.sendSlackMessageEvent()"]
-  sendWorker --> replyDecision{"Worker reply?"}
-  replyDecision -->|"reply"| sendSlack["SlackMessengerPort.sendMessage()"]
-  sendSlack --> botCapture["capture posted bot reply"]
-  botCapture --> sendWorker
-  replyDecision -->|"no_reply or error"| stopNode["No Slack post"]
-```
+1. A Slack Socket Mode event arrives.
+2. The Slack adapter acknowledges the Socket Mode envelope quickly.
+3. The listener normalizes the event into `NormalizedSlackMessageEvent`.
+4. Unsupported events are ignored.
+5. Supported events are assigned `processingIntent: "capture"` or `processingIntent: "invoke"`.
+6. The listener sends the event to `POST /slack/events`.
+7. If the Worker returns `status: "reply"`, the listener posts the text to Slack.
+8. After Slack accepts the reply and returns a timestamp, the listener sends a second Worker event for bot reply capture with `processingIntent: "capture"`.
 
-Important listener methods and functions:
+The tracked thread store currently belongs to listener-side metadata only. Tracked thread replies without a fresh bot mention must not invoke Think.
 
-- `SlackSocketModeAdapter.onMessage()` registers listener callbacks.
-- `SlackSocketModeAdapter.start()` starts Socket Mode.
-- `SlackSocketModeAdapter.resolveBotUserId()` calls Slack `auth.test`.
-- `SlackSocketModeAdapter.sendMessage()` calls Slack `chat.postMessage` and returns the posted Slack `messageTs`.
-- `normalizeSlackMessageEvent()` converts raw Slack events into `NormalizedSlackMessageEvent`.
-- `decideSlackEventHandling()` chooses `processingIntent: "capture" | "invoke"`.
-- `WorkerEventClientAdapter.sendSlackMessageEvent()` sends the normalized request to the Worker.
+## Slack Event Processing
 
-## Processing Rules
-
-The listener forwards bot-visible messages to the Worker with a processing intent:
+The listener forwards bot-visible Slack messages to the Worker with a processing intent:
 
 | Slack event | Intent | Behavior |
 | --- | --- | --- |
 | Direct message (`message.im`) | `invoke` | Save history and run Think. |
 | `app_mention` | `invoke` | Save history and run Think. |
-| Channel/group message with bot mention | `invoke` | Save history and run Think. |
-| Channel/group message without bot mention | `capture` | Save history only. |
-| MPIM with bot mention | `invoke` | Save history and run Think. |
+| Channel or private channel message with explicit bot mention | `invoke` | Save history and run Think. |
+| Channel or private channel message without bot mention | `capture` | Save history only. |
+| MPIM with explicit bot mention | `invoke` | Save history and run Think. |
 | MPIM without bot mention | `capture` | Save history only. |
-| Posted bot reply | `capture` | Save history only. |
+| Posted bot reply captured by the listener | `capture` | Save history only. |
+| Message edits and deletes | ignored | Not stored and not sent to Think. |
+| Hidden Slack events | ignored | Not stored and not sent to Think. |
+| Bot-authored Slack events from Socket Mode | ignored | Avoids loops; posted bot replies are captured explicitly after `chat.postMessage`. |
+| File share events with files or attachments | captured or invoked according to normal mention rules | Metadata may be retained; file bytes are not stored. |
 
-The current normalizer ignores hidden events, bot-authored Slack events, `message_changed`, and `message_deleted`. File share events can be retained when they include files or attachments, but file bytes are not stored.
+MPIM is treated as channel-like in the current version: the bot captures messages it can see, but only invokes on a direct mention.
 
 ## Worker Flow
 
-`fetch()` in `src/cmd/worker/index.ts` handles `POST /slack/events` with `handleSlackEventRequest()`. Other requests are passed to `routeAgentRequest()` for Think/Agents routing.
+The Worker exposes `POST /slack/events` for listener-to-Worker delivery. The same Worker entrypoint also delegates Think/Agents runtime routes to `routeAgentRequest()` for non-Slack paths.
 
 ```mermaid
 flowchart TD
   request["POST /slack/events"] --> handler["handleSlackEventRequest()"]
-  handler --> auth["isAuthorized()"]
+  handler --> auth["Bearer WORKER_INTERNAL_API_TOKEN"]
   handler --> parse["parseNormalizedSlackMessageEvent()"]
   parse --> useCase["HandleSlackMessageUseCase.execute()"]
   useCase --> save["SlackMessageHistoryPort.saveMessage()"]
   save --> duplicate{"duplicate?"}
-  duplicate -->|"yes and invoke"| noReplyDuplicate["no_reply: duplicate_message"]
+  duplicate -->|"yes"| noReplyDup["no_reply: duplicate_message"]
   duplicate -->|"no"| intent{"processingIntent"}
   intent -->|"capture"| noReplyCapture["no_reply: capture_only"]
   intent -->|"invoke"| session["resolveSlackSessionId()"]
-  session --> thinkPort["ThinkSessionPort.submitSlackMessage()"]
-  thinkPort --> agent["SlackThinkAgent.runSlackTurn()"]
-  agent --> workerReply["WorkerSlackReplyResponse"]
-  workerReply --> queueReflection["SkillReflectionQueuePort.enqueue()"]
+  session --> think["ThinkSessionPort.submitSlackMessage()"]
+  think --> reply{"non-empty reply?"}
+  reply -->|"yes"| enqueue["SkillReflectionQueuePort.enqueue()"]
+  reply -->|"no"| noReplyEmpty["no_reply: empty_agent_reply"]
 ```
 
-Important Worker methods and functions:
+Worker rules:
 
-- `handleSlackEventRequest()` validates method, bearer token, JSON body, and request shape.
-- `parseNormalizedSlackMessageEvent()` validates `SlackWorkerRequest` with Zod.
-- `HandleSlackMessageUseCase.execute()` saves history, handles duplicates, and invokes Think when needed.
-- `SkillReflectionQueuePort.enqueue()` queues post-turn generated-skill reflection after successful invoke replies.
-- `resolveSlackSessionId()` maps Slack context to a Think session id.
-- `ThinkSessionAdapter.submitSlackMessage()` calls `SlackThinkAgent.runSlackTurn()`.
-- `D1SlackMessageHistoryAdapter.saveMessage()` inserts Slack history idempotently.
+- Validate the internal bearer token before parsing business input.
+- Validate the request body with module-owned validation.
+- Save Slack history before deciding whether to invoke Think.
+- Return `no_reply` for duplicate events.
+- Return `no_reply` for capture-only events.
+- Invoke Think only for `processingIntent === "invoke"`.
+- Enqueue generated-skill reflection only after a successful invoked Slack turn with a non-empty assistant reply.
+- Do not directly access Cloudflare bindings inside use cases.
 
 ## Think Agent Flow
 
-The Think agent is `SlackThinkAgent` in `src/modules/agent/think-agent.ts`.
+The Think agent class is `SlackThinkAgent` in `src/modules/agent/think-agent.ts`.
 
 ```mermaid
 flowchart TD
-  thinkPort["ThinkSessionAdapter.submitSlackMessage()"] --> runTurn["SlackThinkAgent.runSlackTurn()"]
-  runTurn --> ledgerRead["readCachedSlackTurnReply()"]
-  ledgerRead --> cached{"cached?"}
-  cached -->|"yes"| cachedReply["return cached reply"]
-  cached -->|"no"| saveMessages["saveMessages()"]
-  saveMessages --> model["Workers AI model"]
-  model --> extract["extractLatestAssistantText()"]
-  extract --> ledgerWrite["cacheSlackTurnReply()"]
-  ledgerWrite --> reply["return text"]
+  adapter["ThinkSessionAdapter.submitSlackMessage()"] --> agent["SlackThinkAgent.runSlackTurn()"]
+  agent --> cachedReply["readCachedSlackTurnReply()"]
+  cachedReply --> cached{"cached by idempotency key?"}
+  cached -->|"yes"| returnCached["return cached text"]
+  cached -->|"no"| model["Workers AI through AI SDK provider"]
+  model --> tools["Think tools and generated skills"]
+  tools --> historyTool["getSlackHistoryContext"]
+  historyTool --> historyUseCase["BuildSlackHistoryContextUseCase"]
+  model --> assistantText["extractLatestAssistantText()"]
+  assistantText --> cache["cacheSlackTurnReply()"]
+  cache --> result["return Worker reply text"]
 ```
 
 `SlackThinkAgent` uses:
 
-- `getModel()` to create a Workers AI model through `createWorkersAI()` with Cloudflare AI Gateway enabled.
-- `getSystemPrompt()` to load `buildSlackAgentSystemPrompt()`.
-- `getTools()` to expose `getSlackHistoryContext`.
-- `runSlackTurn()` to submit Slack user messages to Think and return assistant text.
-- `slack_turn_replies` in Think SQLite storage to cache replies by idempotency key.
+- `getModel()` to create the main Workers AI model.
+- `createWorkersAI()` from `workers-ai-provider`.
+- Cloudflare AI Gateway when `AI_GATEWAY_ID` is configured.
+- `buildSlackAgentSystemPrompt()` for the system prompt.
+- `getTools()` to expose typed tools.
+- D1-backed generated skill sources through `createSlackAgentSkillSources()`.
+- Think SQLite storage to cache Slack turn replies by idempotency key.
 
-The default model and AI Gateway are configured in `wrangler.jsonc`:
+The default model values are configured in `wrangler.jsonc`:
 
-```txt
+```text
 AI_GATEWAY_ID=default
 AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 REFLECTION_AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 ```
 
-## Slack History And Summaries
+`AI_MODEL` is for regular Slack turns. `REFLECTION_AI_MODEL` is for generated-skill reflection and can be tuned separately for latency and cost.
 
-Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`. Generated agent skills are stored in D1 table `generated_skills` through `GeneratedSkillPort`.
+## Slack History
 
-Generated skills are learned asynchronously after successful invoked Slack turns. The Worker enqueues a skill reflection job after it has a non-empty Think reply, then the Queue consumer loads recent Slack context and the current generated skill catalog, returning a `skip`, `create`, or `update` decision. Reflection uses `REFLECTION_AI_MODEL`, reduced history context, reasoning-disabled model settings, compact structured output, and a bounded output token budget to avoid routine extraction timeouts and truncated JSON. Approved skills store typed `body_json` plus canonical rendered `body` markdown. Updates preserve history by marking the old row with `is_old = 1` and inserting a new current version.
-
-Reflection jobs do not use the Slack conversation Think `sessionId`; they carry the Slack event and assistant reply as queue payload. D1 table `skill_reflection_jobs` tracks queue job idempotency by Slack `idempotencyKey`.
-
-```mermaid
-flowchart TD
-  workerUseCase["HandleSlackMessageUseCase.execute()"] --> port["SlackMessageHistoryPort"]
-  port --> d1Adapter["D1SlackMessageHistoryAdapter"]
-  d1Adapter --> save["saveMessage()"]
-  d1Adapter --> channel["findMessagesByChannelAndTimeRange()"]
-  d1Adapter --> thread["findMessagesByThreadAndTimeRange()"]
-  d1Adapter --> channelThreads["findThreadMessagesByChannelAndTimeRange()"]
-  save --> table["D1 slack_messages"]
-  channel --> table
-  thread --> table
-  channelThreads --> table
-```
+Passive Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`.
 
 Captured history includes:
 
 - User messages the bot can see after the listener starts.
-- Direct messages, channel messages, group messages, MPIM messages, and thread messages.
-- Bot replies after Slack accepts `chat.postMessage` and returns a message timestamp.
+- Direct messages.
+- Public channel messages visible to the bot.
+- Private channel messages only when the bot is a member.
+- MPIM messages visible to the bot.
+- Thread replies visible to the bot.
+- Bot replies after Slack accepts `chat.postMessage` and returns a Slack message timestamp.
 
 Captured history does not currently include:
 
 - Backfilled messages from before the listener was running.
-- Message edits or deletes.
-- File bytes or attachment contents.
-- Private channel messages unless the bot is a member.
+- Message edits.
+- Message deletes.
+- File bytes.
+- Full attachment file contents.
+- Private channel content when the bot is not a member.
 
-Summary context is built by `BuildSlackHistoryContextUseCase.execute()`:
-
-```mermaid
-flowchart TD
-  tool["getSlackHistoryContext tool"] --> summaryUseCase["BuildSlackHistoryContextUseCase.execute()"]
-  summaryUseCase --> scope{"scope"}
-  scope -->|"thread"| threadQuery["findMessagesByThreadAndTimeRange()"]
-  scope -->|"channel"| channelQuery["findMessagesByChannelAndTimeRange()"]
-  scope -->|"channel_with_threads"| combinedQuery["channel roots + thread replies"]
-  combinedQuery --> channelQuery
-  combinedQuery --> threadReplies["findThreadMessagesByChannelAndTimeRange()"]
-```
+Slack history context is built by `BuildSlackHistoryContextUseCase.execute()` and exposed to the agent through the `getSlackHistoryContext` Think tool.
 
 Supported summary scopes:
 
-- `thread`
-- `channel`
-- `channel_with_threads`
+| Scope | Meaning |
+| --- | --- |
+| `thread` | Read messages in one Slack thread. |
+| `channel` | Read channel root-level messages in a time range. |
+| `channel_with_threads` | Read channel root-level messages plus thread replies in a time range. |
+
+The agent should use `getSlackHistoryContext` before summarizing recent Slack discussion.
+
+## Generated Skills
+
+Generated skills are learned asynchronously after successful invoked Slack turns. They are intended to capture reusable workflows the assistant performed well enough to repeat later.
+
+```mermaid
+flowchart TD
+  slackTurn["Successful invoked Slack turn"] --> enqueue["CloudflareSkillReflectionQueueAdapter.enqueue()"]
+  enqueue --> queue["SKILL_REFLECTION_QUEUE"]
+  queue --> consumer["Worker queue() handler"]
+  consumer --> parse["parseSkillReflectionJob()"]
+  parse --> ledgerStart["D1SkillReflectionJobLedgerAdapter.startJob()"]
+  ledgerStart --> reflection["ReflectOnSlackConversationForSkillUseCase"]
+  reflection --> history["SlackMessageHistoryPort"]
+  reflection --> currentSkills["GeneratedSkillPort.listCurrentEnabledSkills()"]
+  reflection --> model["REFLECTION_AI_MODEL"]
+  model --> decision{"skip/create/update"}
+  decision --> policy["generated-skill-policy"]
+  policy --> save["GeneratedSkillPort"]
+  save --> d1["D1 generated_skills"]
+  decision --> ledgerComplete["skill_reflection_jobs complete"]
+```
+
+Reflection behavior:
+
+- The Worker enqueues reflection after a successful invoked reply instead of blocking the Slack response.
+- Queue payloads carry the Slack event and assistant reply.
+- Reflection jobs do not use the Slack conversation Think `sessionId`.
+- The queue consumer parses and validates each payload before running reflection.
+- `skill_reflection_jobs` tracks idempotency by Slack idempotency key.
+- Already completed jobs are acknowledged and skipped.
+- Failed jobs are recorded and retried with bounded delay.
+- The reflection model loads reduced Slack history context and the current generated skill catalog.
+- The reflection decision is `skip`, `create`, or `update`.
+- TypeScript policy validation is the final authority after model output parsing.
+- Generated skills are universal, not scoped to workspace, channel, thread, or user.
+- Runtime loading only uses current enabled skills where `disabled = 0` and `is_old = 0`.
+- Updates mark the old row with `is_old = 1` and insert a new current version.
+- Disabling a generated skill sets `disabled = 1`; disabled rows remain stored but are not loaded by Think.
+- Generated skills may only declare `getSlackHistoryContext` as an allowed tool.
+
+Generated skill bodies are typed as `GeneratedSkillBody`, stored in `body_json`, and rendered into canonical markdown `body` content by `src/modules/agent/generated-skill-body.ts`.
 
 ## Idempotency
 
-Slack can deliver more than one event for the same visible message. For example, a bot mention can arrive as both `app_mention` and `message.groups`.
+Slack can deliver overlapping event envelopes for the same user-visible message. For example, an explicit mention can arrive as both `app_mention` and `message.groups`.
 
 Current idempotency behavior:
 
-- `normalizeSlackMessageEvent()` uses a stable message key: `slack:{teamId}:{channelId}:{messageTs}` unless Slack provides `client_msg_id`.
-- `D1SlackMessageHistoryAdapter.saveMessage()` uses `INSERT OR IGNORE`.
-- `HandleSlackMessageUseCase.execute()` returns `no_reply` with `reason: "duplicate_message"` for duplicate invoke events.
-- `SlackThinkAgent.runSlackTurn()` caches Think replies in `slack_turn_replies`.
-- `D1SkillReflectionJobLedgerAdapter` skips already completed reflection jobs and allows failed queue messages to retry.
+- Listener normalization prefers stable message identity for history idempotency.
+- The default message key shape is `slack:{teamId}:{channelId}:{messageTs}` unless a stronger user-message identity is available.
+- Slack `event_id` is not used as the only message-history idempotency key because separate Slack event envelopes can represent the same visible message.
+- `D1SlackMessageHistoryAdapter.saveMessage()` uses idempotent insert behavior.
+- Duplicate invoke events return `no_reply` with `reason: "duplicate_message"`.
+- Duplicate capture events return `no_reply` and do not post to Slack.
+- `SlackThinkAgent.runSlackTurn()` caches replies by idempotency key in Think storage.
+- `D1SkillReflectionJobLedgerAdapter` prevents completed reflection jobs from running again and allows failed queue messages to retry.
+
+## Session Resolution
+
+Slack contexts are mapped to deterministic Think sessions by `resolveSlackSessionId()`.
+
+Default mapping:
+
+```text
+DM with bot:
+slack:{teamId}:dm:{userId}
+
+Channel or private channel thread:
+slack:{teamId}:channel:{channelId}:thread:{threadTs}
+
+Channel or private channel root message:
+slack:{teamId}:channel:{channelId}:thread:{messageTs}
+```
+
+Thread-level sessions are preferred for channel conversations so unrelated channel discussions do not pollute the active Think context.
 
 ## Contracts
 
-The listener sends `SlackWorkerRequest` JSON to the Worker:
+The listener sends a `SlackWorkerRequest` to the Worker:
 
 ```ts
 type SlackWorkerRequest = NormalizedSlackMessageEvent & {
   processingIntent: "capture" | "invoke";
+};
+```
+
+The normalized Slack message shape includes:
+
+```ts
+type NormalizedSlackMessageEvent = {
+  teamId: string;
+  channelId: string;
+  userId: string;
+  text: string;
+  messageTs: string;
+  threadTs?: string;
+  eventId?: string;
+  eventTs?: string;
+  clientMsgId?: string;
+  channelType?: "im" | "channel" | "group" | "mpim" | string;
+  idempotencyKey: string;
 };
 ```
 
@@ -254,47 +458,13 @@ Common `no_reply` reasons:
 - `duplicate_message`
 - `empty_agent_reply`
 
-## D1 Setup
-
-Create the Slack history database:
-
-```sh
-npx wrangler d1 create slack-ai-agent-v3-history
-```
-
-Update `database_id` in `wrangler.jsonc` if a new database is created.
-
-Apply local migrations for `wrangler dev`:
-
-```sh
-npx wrangler d1 migrations apply slack-ai-agent-v3-history --local
-```
-
-Apply remote migrations for deployed environments:
-
-```sh
-npx wrangler d1 migrations apply slack-ai-agent-v3-history --remote
-```
-
-If `wrangler dev` reports `D1_ERROR: no such table: slack_messages` or `no such table: generated_skills`, apply local migrations again and restart `wrangler dev` if needed.
-
 ## Environment
 
-Create local listener environment from the template:
-
-```sh
-cp .env.example .env
-```
-
-For local Worker development, create Wrangler local values from the Worker template:
-
-```sh
-cp .dev.vars.example .dev.vars
-```
+Listener values are loaded from `.env` through `loadListenerEnv()`.
 
 Required listener variables:
 
-```txt
+```text
 SLACK_BOT_TOKEN
 SLACK_APP_TOKEN
 WORKER_SLACK_EVENT_URL
@@ -303,22 +473,33 @@ WORKER_INTERNAL_API_TOKEN
 
 Optional listener variables:
 
-```txt
+```text
 SLACK_BOT_USER_ID
 LOG_LEVEL
 ```
 
+`LOG_LEVEL` must be one of:
+
+```text
+debug
+info
+warn
+error
+```
+
+`WORKER_SLACK_EVENT_URL` must be a valid URL with path `/slack/events`.
+
+Worker local values live in `.dev.vars` for `wrangler dev`.
+
 Required Worker secret:
 
-```txt
+```text
 WORKER_INTERNAL_API_TOKEN
 ```
 
-`WORKER_SLACK_EVENT_URL` should point at the Worker Slack endpoint, for example `http://localhost:8787/slack/events`.
+Important Worker bindings and vars:
 
-Worker bindings and vars in `wrangler.jsonc`:
-
-```txt
+```text
 AI
 AI_GATEWAY_ID
 AI_MODEL
@@ -326,54 +507,86 @@ REFLECTION_AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB
 SKILL_REFLECTION_QUEUE
+WORKER_INTERNAL_API_TOKEN
 ```
 
-## Repository Layout
+Never commit `.env`, `.dev.vars`, Slack tokens, internal Worker tokens, Wrangler local state, or local databases.
 
-```txt
-src/
-  cmd/
-    listener/
-    worker/
-  adapters/
-    logger/
-    slack/
-    storage/
-    think/
-    worker/
-  modules/
-    agent/
-    slack/
-    slack-listener/
-  ports/
-  prompts/
-  shared/
-  tools/
-migrations/
-proto/features/
+## Wrangler Configuration
+
+`wrangler.jsonc` currently defines:
+
+- Worker name: `slack-ai-agent-v3`.
+- Main Worker entrypoint: `src/cmd/worker/index.ts`.
+- Compatibility date: `2026-06-09`.
+- Compatibility flag: `nodejs_compat`.
+- Workers AI binding: `AI`.
+- D1 binding: `SLACK_HISTORY_DB`.
+- Durable Object binding: `SLACK_THINK_AGENT` with class `SlackThinkAgent`.
+- Queue producer binding: `SKILL_REFLECTION_QUEUE`.
+- Queue consumer for `slack-ai-agent-v3-skill-reflection`.
+- Dead letter queue: `slack-ai-agent-v3-skill-reflection-dlq`.
+- Observability enabled with full head sampling.
+
+When creating a new D1 database, update the `database_id` in `wrangler.jsonc`.
+
+## D1 Operations
+
+Create the D1 database when needed:
+
+```sh
+npx wrangler d1 create slack-ai-agent-v3-history
 ```
 
-Important files:
+Apply local migrations:
 
-- `src/modules/slack-listener/slack-event-normalizer.ts`
-- `src/modules/slack-listener/slack-event-filter.ts`
-- `src/modules/slack-listener/slack-listener.use-case.ts`
-- `src/modules/slack/slack.handler.ts`
-- `src/modules/slack/handle-slack-message.use-case.ts`
-- `src/modules/slack/slack-history-summary.use-case.ts`
-- `src/modules/agent/think-agent.ts`
-- `src/modules/agent/skill-reflection.use-case.ts`
-- `src/modules/agent/generated-skill-body.ts`
-- `src/prompts/agent.prompts.ts`
-- `src/prompts/skill-reflection.prompts.ts`
-- `src/prompts/generated-skills.prompts.ts`
-- `src/adapters/storage/d1-slack-message-history.adapter.ts`
-- `src/adapters/storage/d1-generated-skill.adapter.ts`
-- `migrations/0001_slack_messages.sql`
-- `migrations/0002_generated_skills.sql`
-- `migrations/0003_generated_skill_versions.sql`
+```sh
+npx wrangler d1 migrations apply slack-ai-agent-v3-history --local
+```
 
-## Verification
+Apply remote migrations:
+
+```sh
+npx wrangler d1 migrations apply slack-ai-agent-v3-history --remote
+```
+
+Use `--local` for local `wrangler dev` storage and `--remote` for deployed Cloudflare D1.
+
+Current migrations:
+
+| Migration | Purpose |
+| --- | --- |
+| `migrations/0001_slack_messages.sql` | Creates Slack history storage. |
+| `migrations/0002_generated_skills.sql` | Creates generated skill storage. |
+| `migrations/0003_generated_skill_versions.sql` | Adds generated skill versioning/current-row support. |
+| `migrations/0004_skill_reflection_jobs.sql` | Creates reflection job ledger storage. |
+
+If `wrangler dev` reports `D1_ERROR: no such table: slack_messages`, `no such table: generated_skills`, or `no such table: skill_reflection_jobs`, apply local migrations again and restart `wrangler dev` if needed.
+
+## Testing
+
+Use Vitest. Prefer use case tests with mocked ports and in-memory adapters. Unit tests must not call real Slack, real Cloudflare services, real Workers AI, real D1, or real Think runtime unless they are explicitly integration tests.
+
+Focused test areas:
+
+- Slack event normalization.
+- Slack event filtering.
+- Listener use case behavior.
+- Worker request validation.
+- Slack message handling.
+- Session resolution.
+- Slack history summary context.
+- D1 history adapter behavior.
+- Generated skill adapter behavior.
+- Generated skill body rendering.
+- Generated skill source loading.
+- Generated skill policy validation.
+- Skill reflection use case behavior.
+- Skill reflection job validation and runner behavior.
+- Queue adapter behavior.
+- Think agent behavior around tools, generated skills, and idempotency.
+- Environment validation.
+- Logging adapter behavior.
 
 Run before completing TypeScript changes:
 
@@ -388,12 +601,63 @@ Run for Worker/config changes:
 npx wrangler deploy --dry-run
 ```
 
-Run for D1 migration changes:
+Run for D1 migration changes when practical:
 
 ```sh
 npx wrangler d1 migrations apply slack-ai-agent-v3-history --local
 ```
 
-## Agent Guidance
+## Troubleshooting
 
-See `AGENTS.md` for detailed coding-agent rules, repository workflow, commit conventions, architecture constraints, and cleanup rules.
+If the listener fails at startup:
+
+- Confirm `.env` exists.
+- Confirm `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN` are set.
+- Confirm `WORKER_SLACK_EVENT_URL` points to `/slack/events`.
+- Confirm `WORKER_INTERNAL_API_TOKEN` matches the Worker value.
+- Confirm the Slack app has Socket Mode enabled.
+
+If the Worker rejects listener requests:
+
+- Confirm `Authorization: Bearer <WORKER_INTERNAL_API_TOKEN>` is being sent by `WorkerEventClientAdapter`.
+- Confirm `.dev.vars` or deployed secrets contain `WORKER_INTERNAL_API_TOKEN`.
+- Confirm the listener points to the correct Worker URL.
+
+If the Worker reports missing D1 tables:
+
+- Apply local migrations with `npx wrangler d1 migrations apply slack-ai-agent-v3-history --local`.
+- Restart `wrangler dev` if the local Miniflare instance is stale.
+- Confirm `wrangler.jsonc` points to the intended D1 database.
+
+If Slack messages are captured but the agent does not reply:
+
+- Confirm the message has `processingIntent: "invoke"`.
+- In channels, mention the bot explicitly.
+- In MPIM, mention the bot explicitly.
+- Check for duplicate message behavior and `duplicate_message` responses.
+- Check Worker logs for Think or model errors.
+
+If generated skills do not appear at runtime:
+
+- Confirm the reflection queue is configured.
+- Confirm `skill_reflection_jobs` exists.
+- Confirm generated skills have `disabled = 0`.
+- Confirm generated skills have `is_old = 0`.
+- Confirm the generated skill was approved by `generated-skill-policy`.
+- Confirm runtime loading goes through `createSlackAgentSkillSources()`.
+
+## Development Notes For Future Agents
+
+When changing behavior, start at the use case and follow the ports. Do not put business logic in `src/cmd/worker/index.ts`, `src/cmd/listener/index.ts`, adapters, or prompt files.
+
+When adding external behavior, define or reuse a port first. Keep adapters replaceable and keep Cloudflare, Slack, Think, and SDK details out of use cases.
+
+When changing Slack event processing, add regression tests for duplicate delivery and capture-vs-invoke behavior.
+
+When changing generated skills, update tests for the D1 adapter, in-memory adapter, generated skill body rendering, generated skill source loading, reflection use case, reflection job runner, and policy validation as appropriate.
+
+When changing Worker or Queue configuration, validate with `npx wrangler deploy --dry-run`.
+
+When changing D1 schema, add a new migration. Do not edit or remove applied migrations.
+
+See `AGENTS.md` for repository-specific operating instructions for coding agents.
