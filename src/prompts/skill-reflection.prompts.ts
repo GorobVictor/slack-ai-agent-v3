@@ -25,6 +25,9 @@ export function buildSkillReflectionSystemPrompt(): string {
     "The skill name must be lowercase kebab-case, never snake_case or title case.",
     'The description must include the exact phrase "Use when" followed by a clear trigger.',
     "The candidate body must be typed: goal, triggers, instructions, optional safetyNotes, and optional toolUsage.",
+    "Keep generated JSON compact. Do not add whitespace, markdown, or text after the JSON object.",
+    "For create/update, use at most 3 triggers, 5 instructions, and 3 safety notes.",
+    "Keep reason, goal, triggers, and instructions concise.",
     "If the pattern is weak, narrow, private, user-specific, or one-off, return action skip.",
     `Allowed tools for generated skills are limited to ${GENERATED_SKILL_ALLOWED_TOOL}.`,
   ].join("\n");
@@ -57,7 +60,9 @@ export function buildSkillReflectionPrompt(input: {
     "Use action create only for genuinely new reusable workflows.",
     'For create/update, write `name` in lowercase kebab-case and include "Use when" in `description`.',
     "For create/update, fill body.goal, body.triggers, body.instructions, optional body.safetyNotes, and optional body.toolUsage.",
+    "For create/update, keep body.triggers to at most 3 items and body.instructions to at most 5 items.",
     "Keep body fields concise, universal, and written as instructions for future agent behavior.",
+    "Return compact JSON only. Stop immediately after the closing JSON object.",
   ].join("\n");
 }
 

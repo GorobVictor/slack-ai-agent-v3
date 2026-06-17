@@ -10,11 +10,118 @@ import type {
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import type { SkillReflectionDecision } from "./generated-skill-policy.js";
 import {
+  normalizeModelSkillReflectionDecision,
   ReflectOnSlackConversationForSkillUseCase,
   SKILL_REFLECTION_HISTORY_LIMIT,
+  SKILL_REFLECTION_MAX_OUTPUT_TOKENS,
 } from "./skill-reflection.use-case.js";
 
 describe("ReflectOnSlackConversationForSkillUseCase", () => {
+  it("uses a larger bounded output budget for structured create and update decisions", () => {
+    expect(SKILL_REFLECTION_MAX_OUTPUT_TOKENS).toBe(2_000);
+  });
+
+  it("normalizes flat create decisions and falls back to the top-level reason", () => {
+    expect(
+      normalizeModelSkillReflectionDecision({
+        action: "create",
+        reason: "Reusable code-only response preference.",
+        confidence: 0.95,
+        candidate: {
+          name: "minimal-code-only-response",
+          description:
+            "Provide code-only answers without extra explanation. Use when users ask for code-only responses.",
+          body: {
+            goal: "Provide code-only answers without extra explanation.",
+            triggers: ["Use when users ask for code-only responses."],
+            instructions: ["Return only the requested code.", "Do not add prose."],
+          },
+          confidence: 0.95,
+        },
+      }),
+    ).toEqual({
+      action: "create",
+      candidate: {
+        name: "minimal-code-only-response",
+        description:
+          "Provide code-only answers without extra explanation. Use when users ask for code-only responses.",
+        body: {
+          goal: "Provide code-only answers without extra explanation.",
+          triggers: ["Use when users ask for code-only responses."],
+          instructions: ["Return only the requested code.", "Do not add prose."],
+        },
+        confidence: 0.95,
+        reason: "Reusable code-only response preference.",
+      },
+    });
+  });
+
+  it("normalizes flat update decisions", () => {
+    expect(
+      normalizeModelSkillReflectionDecision({
+        action: "update",
+        existingSkillName: "minimal-code-only-response",
+        reason: "Refines code-only behavior.",
+        confidence: 0.96,
+        candidate: {
+          name: "minimal-code-only-response",
+          description:
+            "Provide code-only answers without extra explanation. Use when users ask for code-only responses.",
+          body: {
+            goal: "Provide code-only answers without extra explanation.",
+            triggers: ["Use when users ask for code-only responses."],
+            instructions: ["Return only the requested code."],
+          },
+          confidence: 0.96,
+          reason: "Candidate-specific reason.",
+        },
+      }),
+    ).toMatchObject({
+      action: "update",
+      existingSkillName: "minimal-code-only-response",
+      candidate: {
+        reason: "Candidate-specific reason.",
+      },
+    });
+  });
+
+  it("normalizes invalid create or update decisions to skip", () => {
+    expect(
+      normalizeModelSkillReflectionDecision({
+        action: "create",
+        reason: "Missing candidate.",
+        confidence: 0.9,
+      }),
+    ).toEqual({
+      action: "skip",
+      reason: "Skill reflection returned create without a candidate.",
+      confidence: 0,
+    });
+
+    expect(
+      normalizeModelSkillReflectionDecision({
+        action: "update",
+        reason: "Missing existing skill name.",
+        confidence: 0.9,
+        candidate: {
+          name: "minimal-code-only-response",
+          description:
+            "Provide code-only answers without extra explanation. Use when users ask for code-only responses.",
+          body: {
+            goal: "Provide code-only answers without extra explanation.",
+            triggers: ["Use when users ask for code-only responses."],
+            instructions: ["Return only the requested code."],
+          },
+          confidence: 0.9,
+        },
+      }),
+    ).toEqual({
+      action: "skip",
+      reason: "Skill reflection returned update without existingSkillName.",
+      confidence: 0,
+    });
+  });
+
   it("stores a create decision as version 1", async () => {
     const history = new InMemorySlackMessageHistoryAdapter();
     const skills = new InMemoryGeneratedSkillAdapter();

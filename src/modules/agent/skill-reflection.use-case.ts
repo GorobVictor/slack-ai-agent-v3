@@ -45,29 +45,22 @@ const typedSkillCandidateSchema = z.object({
   body: generatedSkillBodySchema,
   allowedTools: z.string().optional(),
   confidence: z.number().min(0).max(1),
-  reason: z.string(),
+  reason: z.string().optional(),
 });
 
-const skillReflectionDecisionSchema = z.discriminatedUnion("action", [
-  z.object({
-    action: z.literal("skip"),
-    reason: z.string(),
-    confidence: z.number().min(0).max(1),
-  }),
-  z.object({
-    action: z.literal("create"),
-    candidate: typedSkillCandidateSchema,
-  }),
-  z.object({
-    action: z.literal("update"),
-    existingSkillName: z.string(),
-    candidate: typedSkillCandidateSchema,
-  }),
-]);
+const skillReflectionDecisionSchema = z.object({
+  action: z.enum(["skip", "create", "update"]),
+  reason: z.string(),
+  confidence: z.number().min(0).max(1),
+  existingSkillName: z.string().optional(),
+  candidate: typedSkillCandidateSchema.optional(),
+});
+
+type ModelSkillReflectionDecision = z.infer<typeof skillReflectionDecisionSchema>;
 
 export const SKILL_REFLECTION_HISTORY_DAYS = 3;
 export const SKILL_REFLECTION_HISTORY_LIMIT = 50;
-export const SKILL_REFLECTION_MAX_OUTPUT_TOKENS = 800;
+export const SKILL_REFLECTION_MAX_OUTPUT_TOKENS = 2_000;
 
 export type SkillReflectionInput = {
   event: SlackWorkerRequest;
@@ -247,7 +240,56 @@ export function createModelSkillReflectionCandidateGenerator(
       prompt: buildSkillReflectionPrompt(input),
     });
 
-    return result.output;
+    return normalizeModelSkillReflectionDecision(result.output);
+  };
+}
+
+export function normalizeModelSkillReflectionDecision(
+  decision: ModelSkillReflectionDecision,
+): SkillReflectionDecision {
+  if (decision.action === "skip") {
+    return {
+      action: "skip",
+      reason: decision.reason,
+      confidence: decision.confidence,
+    };
+  }
+
+  if (!decision.candidate) {
+    return {
+      action: "skip",
+      reason: `Skill reflection returned ${decision.action} without a candidate.`,
+      confidence: 0,
+    };
+  }
+
+  const candidate = {
+    ...decision.candidate,
+    confidence: decision.candidate.confidence,
+    reason: decision.candidate.reason?.trim() || decision.reason,
+  };
+
+  if (decision.action === "update") {
+    const existingSkillName = decision.existingSkillName?.trim();
+
+    if (!existingSkillName) {
+      return {
+        action: "skip",
+        reason: "Skill reflection returned update without existingSkillName.",
+        confidence: 0,
+      };
+    }
+
+    return {
+      action: "update",
+      existingSkillName,
+      candidate,
+    };
+  }
+
+  return {
+    action: "create",
+    candidate,
   };
 }
 
