@@ -1,11 +1,11 @@
 import { describe, expect, it } from "vitest";
 
-import { renderGeneratedSkillBody } from "./generated-skill-body.js";
+import { renderGeneratedSkillBodyPrompt } from "../../prompts/generated-skills.prompts.js";
 
-describe("renderGeneratedSkillBody", () => {
+describe("renderGeneratedSkillBodyPrompt", () => {
   it("renders typed generated skill body into canonical markdown", () => {
     expect(
-      renderGeneratedSkillBody({
+      renderGeneratedSkillBodyPrompt({
         goal: "Return concise Slack history.",
         triggers: ["Use when users ask for thread history."],
         instructions: ["Read captured Slack history.", "List who wrote what and when."],

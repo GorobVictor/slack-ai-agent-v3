@@ -5,9 +5,12 @@ import { createWorkersAI } from "workers-ai-provider";
 import { ConsoleLoggerAdapter } from "../../adapters/logger/console-logger.adapter.js";
 import { D1GeneratedSkillAdapter } from "../../adapters/storage/d1-generated-skill.adapter.js";
 import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-message-history.adapter.js";
+import {
+  buildSlackAgentSystemPrompt,
+  buildSlackUserMessagePrompt,
+} from "../../prompts/agent.prompts.js";
 import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import { buildWorkersAIGatewayOptions } from "./agent-ai-gateway.js";
-import { buildSlackAgentSystemPrompt } from "./agent.prompts.js";
 import { createSlackAgentSkillSources } from "./agent.skills.js";
 import { createSlackAgentTools } from "./agent.tools.js";
 import type {
@@ -67,7 +70,7 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
           {
             id: `slack-${input.event.idempotencyKey}`,
             role: "user",
-            parts: [{ type: "text", text: formatSlackUserMessage(input) }],
+            parts: [{ type: "text", text: buildSlackUserMessagePrompt(input.event) }],
           },
         ]);
       } finally {
@@ -133,18 +136,6 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
       assistantReply,
     });
   }
-}
-
-function formatSlackUserMessage(input: RunSlackTurnInput): string {
-  const { event } = input;
-  const context = [
-    `Slack team: ${event.teamId}`,
-    `Slack channel: ${event.channelId}`,
-    `Slack user: ${event.userId}`,
-    `Slack thread: ${event.threadTs ?? event.messageTs}`,
-  ].join("\n");
-
-  return `${context}\n\nMessage:\n${event.text}`;
 }
 
 function extractLatestAssistantText(messages: UIMessage[], beforeMessageIds: Set<string>): string {

@@ -2,6 +2,10 @@ import type {
   SlackHistoryMessage,
   SlackMessageHistoryPort,
 } from "../../ports/slack-message-history.port.js";
+import {
+  buildSlackHistoryContextPrompt,
+  EMPTY_SLACK_HISTORY_CONTEXT_PROMPT,
+} from "../../prompts/slack-history.prompts.js";
 import type { SlackWorkerRequest } from "./slack.types.js";
 
 export type SlackHistorySummaryScope = "thread" | "channel" | "channel_with_threads";
@@ -36,10 +40,10 @@ export class BuildSlackHistoryContextUseCase {
           : await this.history.findMessagesByChannelAndTimeRange(baseQuery);
 
     if (messages.length === 0) {
-      return "No Slack history was captured for the requested scope and time range.";
+      return EMPTY_SLACK_HISTORY_CONTEXT_PROMPT;
     }
 
-    return formatSlackHistory(messages);
+    return buildSlackHistoryContextPrompt(messages);
   }
 }
 
@@ -72,13 +76,4 @@ function buildSlackTimeRange(messageTs: string, days: number): { sinceTs: string
     sinceTs: (safeUntil - safeDays * 86_400).toFixed(6),
     untilTs: safeUntil.toFixed(6),
   };
-}
-
-function formatSlackHistory(messages: SlackHistoryMessage[]): string {
-  return messages
-    .map((message) => {
-      const thread = message.threadTs ? ` thread:${message.threadTs}` : "";
-      return `[${message.messageTs}${thread}] <@${message.userId}>: ${message.text}`;
-    })
-    .join("\n");
 }

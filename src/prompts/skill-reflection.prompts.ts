@@ -1,4 +1,16 @@
-import type { SlackWorkerRequest } from "../slack/slack.types.js";
+import type { GeneratedSkill } from "../ports/generated-skill.port.js";
+import type { SlackWorkerRequest } from "../modules/slack/slack.types.js";
+import { GENERATED_SKILL_ALLOWED_TOOL } from "./generated-skills.prompts.js";
+
+/**
+ * Used by:
+ * - src/modules/agent/skill-reflection.use-case.ts -> createModelSkillReflectionCandidateGenerator()
+ * - src/modules/agent/skill-reflection.use-case.ts -> ReflectOnSlackConversationForSkillUseCase.execute()
+ */
+export const SKILL_REFLECTION_OUTPUT_NAME = "SkillReflectionDecision";
+
+export const SKILL_REFLECTION_OUTPUT_DESCRIPTION =
+  "A create, update, or skip decision for generated reusable skills.";
 
 export function buildSkillReflectionSystemPrompt(): string {
   return [
@@ -14,7 +26,7 @@ export function buildSkillReflectionSystemPrompt(): string {
     'The description must include the exact phrase "Use when" followed by a clear trigger.',
     "The candidate body must be typed: goal, triggers, instructions, optional safetyNotes, and optional toolUsage.",
     "If the pattern is weak, narrow, private, user-specific, or one-off, return action skip.",
-    "Allowed tools for generated skills are limited to getSlackHistoryContext.",
+    `Allowed tools for generated skills are limited to ${GENERATED_SKILL_ALLOWED_TOOL}.`,
   ].join("\n");
 }
 
@@ -46,4 +58,22 @@ export function buildSkillReflectionPrompt(input: {
     "For create/update, fill body.goal, body.triggers, body.instructions, optional body.safetyNotes, and optional body.toolUsage.",
     "Keep body fields concise, universal, and written as instructions for future agent behavior.",
   ].join("\n");
+}
+
+export function buildExistingSkillsCatalogPrompt(skills: GeneratedSkill[]): string {
+  if (skills.length === 0) {
+    return "No current generated skills exist.";
+  }
+
+  return skills
+    .map((skill) =>
+      [
+        `name: ${skill.name}`,
+        `version: ${skill.version}`,
+        `description: ${skill.description}`,
+        `allowedTools: ${skill.allowedTools ?? "none"}`,
+        `goal: ${skill.bodyJson.goal}`,
+      ].join("\n"),
+    )
+    .join("\n\n---\n\n");
 }

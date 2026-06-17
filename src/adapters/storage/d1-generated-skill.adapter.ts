@@ -6,10 +6,12 @@ import type {
   SaveAutoApprovedSkillDecisionInput,
   SaveAutoApprovedSkillDecisionResult,
 } from "../../ports/generated-skill.port.js";
+import { normalizeGeneratedSkillBody } from "../../modules/agent/generated-skill-body.js";
 import {
-  normalizeGeneratedSkillBody,
-  renderGeneratedSkillBody,
-} from "../../modules/agent/generated-skill-body.js";
+  GENERATED_SKILL_DEFAULT_DESCRIPTION_SUFFIX,
+  GENERATED_SKILL_LEGACY_GOAL,
+  renderGeneratedSkillBodyPrompt,
+} from "../../prompts/generated-skills.prompts.js";
 
 type GeneratedSkillRow = {
   id: string;
@@ -50,7 +52,7 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
       };
     }
 
-    const renderedBody = renderGeneratedSkillBody(input.candidate.body);
+    const renderedBody = renderGeneratedSkillBodyPrompt(input.candidate.body);
 
     if (current && isUnchanged(current, input, renderedBody)) {
       return {
@@ -233,8 +235,8 @@ function parseBodyJson(value: string): GeneratedSkillBody {
     return normalizeGeneratedSkillBody(JSON.parse(value) as GeneratedSkillBody);
   } catch {
     return {
-      goal: "Legacy generated skill",
-      triggers: ["Use when a future user request clearly matches this reusable workflow."],
+      goal: GENERATED_SKILL_LEGACY_GOAL,
+      triggers: [GENERATED_SKILL_DEFAULT_DESCRIPTION_SUFFIX],
       instructions: [value],
     };
   }

@@ -3,9 +3,13 @@ import type {
   GeneratedSkillBody,
   SaveAutoApprovedSkillDecisionInput,
 } from "../../ports/generated-skill.port.js";
+import {
+  GENERATED_SKILL_ALLOWED_TOOL,
+  GENERATED_SKILL_DEFAULT_DESCRIPTION_SUFFIX,
+} from "../../prompts/generated-skills.prompts.js";
 import { normalizeGeneratedSkillBody } from "./generated-skill-body.js";
 
-export const GENERATED_SKILL_ALLOWED_TOOLS = ["getSlackHistoryContext"] as const;
+export const GENERATED_SKILL_ALLOWED_TOOLS = [GENERATED_SKILL_ALLOWED_TOOL] as const;
 
 export type TypedGeneratedSkillCandidate = {
   name: string;
@@ -201,7 +205,7 @@ function normalizeSkillDescription(value: string): string {
     return description;
   }
 
-  return `${description} Use when a future user request clearly matches this reusable workflow.`;
+  return `${description} ${GENERATED_SKILL_DEFAULT_DESCRIPTION_SUFFIX}`;
 }
 
 function validateSkillBody(body: GeneratedSkillBody): string | null {

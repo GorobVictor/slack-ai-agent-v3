@@ -1,10 +1,19 @@
 import { generateText, Output, type LanguageModel } from "ai";
 import { z } from "zod";
 
-import type { GeneratedSkill } from "../../ports/generated-skill.port.js";
 import type { GeneratedSkillPort } from "../../ports/generated-skill.port.js";
 import type { LoggerPort } from "../../ports/logger.port.js";
 import type { SlackMessageHistoryPort } from "../../ports/slack-message-history.port.js";
+import {
+  GENERATED_SKILL_ALLOWED_TOOL,
+} from "../../prompts/generated-skills.prompts.js";
+import {
+  buildExistingSkillsCatalogPrompt,
+  buildSkillReflectionPrompt,
+  buildSkillReflectionSystemPrompt,
+  SKILL_REFLECTION_OUTPUT_DESCRIPTION,
+  SKILL_REFLECTION_OUTPUT_NAME,
+} from "../../prompts/skill-reflection.prompts.js";
 import {
   BuildSlackHistoryContextUseCase,
   type SlackHistorySummaryScope,
@@ -14,10 +23,6 @@ import {
   type SkillReflectionDecision,
   validateGeneratedSkillCandidate,
 } from "./generated-skill-policy.js";
-import {
-  buildSkillReflectionPrompt,
-  buildSkillReflectionSystemPrompt,
-} from "./skill-reflection.prompts.js";
 
 const generatedSkillBodySchema = z.object({
   goal: z.string(),
@@ -27,7 +32,7 @@ const generatedSkillBodySchema = z.object({
   toolUsage: z
     .array(
       z.object({
-        tool: z.literal("getSlackHistoryContext"),
+        tool: z.literal(GENERATED_SKILL_ALLOWED_TOOL),
         when: z.string(),
       }),
     )
@@ -118,7 +123,7 @@ export class ReflectOnSlackConversationForSkillUseCase {
       });
 
       const existingSkills = await this.options.skills.listEnabledSkills();
-      const existingSkillsCatalog = formatExistingSkillsCatalog(existingSkills);
+      const existingSkillsCatalog = buildExistingSkillsCatalogPrompt(existingSkills);
 
       this.options.logger?.info("[gen-skills] Existing skill catalog loaded", {
         existingSkillCount: existingSkills.length,
@@ -204,8 +209,8 @@ export function createModelSkillReflectionCandidateGenerator(
       model,
       output: Output.object({
         schema: skillReflectionDecisionSchema,
-        name: "SkillReflectionDecision",
-        description: "A create, update, or skip decision for generated reusable skills.",
+        name: SKILL_REFLECTION_OUTPUT_NAME,
+        description: SKILL_REFLECTION_OUTPUT_DESCRIPTION,
       }),
       system: buildSkillReflectionSystemPrompt(),
       prompt: buildSkillReflectionPrompt(input),
@@ -217,24 +222,6 @@ export function createModelSkillReflectionCandidateGenerator(
 
 function resolveReflectionHistoryScope(event: SlackWorkerRequest): SlackHistorySummaryScope {
   return event.channelType === "im" ? "channel" : "thread";
-}
-
-function formatExistingSkillsCatalog(skills: GeneratedSkill[]): string {
-  if (skills.length === 0) {
-    return "No current generated skills exist.";
-  }
-
-  return skills
-    .map((skill) =>
-      [
-        `name: ${skill.name}`,
-        `version: ${skill.version}`,
-        `description: ${skill.description}`,
-        `allowedTools: ${skill.allowedTools ?? "none"}`,
-        `goal: ${skill.bodyJson.goal}`,
-      ].join("\n"),
-    )
-    .join("\n\n---\n\n");
 }
 
 function readDecisionName(decision: SkillReflectionDecision): string | undefined {

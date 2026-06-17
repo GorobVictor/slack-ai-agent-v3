@@ -5,10 +5,8 @@ import type {
   SaveAutoApprovedSkillDecisionInput,
   SaveAutoApprovedSkillDecisionResult,
 } from "../../ports/generated-skill.port.js";
-import {
-  normalizeGeneratedSkillBody,
-  renderGeneratedSkillBody,
-} from "../../modules/agent/generated-skill-body.js";
+import { normalizeGeneratedSkillBody } from "../../modules/agent/generated-skill-body.js";
+import { renderGeneratedSkillBodyPrompt } from "../../prompts/generated-skills.prompts.js";
 
 export class InMemoryGeneratedSkillAdapter implements GeneratedSkillPort {
   private readonly skills: GeneratedSkill[] = [];
@@ -32,7 +30,7 @@ export class InMemoryGeneratedSkillAdapter implements GeneratedSkillPort {
       };
     }
 
-    const renderedBody = renderGeneratedSkillBody(input.candidate.body);
+    const renderedBody = renderGeneratedSkillBodyPrompt(input.candidate.body);
 
     if (current && isUnchanged(current, input, renderedBody)) {
       return {
