@@ -65,9 +65,26 @@ export class SlackListenerUseCase {
         ...event,
         processingIntent: decision.processingIntent,
       };
-      const workerReply = await this.sendWorkerEventWithFallback(workerEvent);
+      const workerReply =
+        decision.processingIntent === "invoke"
+          ? await this.streamWorkerEventWithFallback({
+              ...workerEvent,
+              processingIntent: "invoke",
+            })
+          : await this.sendWorkerEventWithFallback(workerEvent);
 
       if (!workerReply) {
+        return;
+      }
+
+      if (decision.processingIntent === "invoke") {
+        this.logger.info("Forwarded Slack event to Worker", {
+          ...safeMetadata,
+          reason: decision.reason,
+          processingIntent: decision.processingIntent,
+          workerReplyStatus: workerReply.status,
+          trackedThread: decision.shouldTrackThread,
+        });
         return;
       }
 
@@ -83,19 +100,10 @@ export class SlackListenerUseCase {
           threadTs: replyThreadTs,
           text: workerReply.text,
         });
-        await this.workerClient.sendSlackMessageEvent({
-          source: "slack",
-          teamId: event.teamId,
-          channelId: event.channelId,
-          userId: this.botUserId,
+        await this.captureBotReply(event, {
           text: workerReply.text,
           messageTs: postedMessage.messageTs,
           threadTs: replyThreadTs,
-          channelType: event.channelType,
-          isMention: false,
-          isThreadMessage: true,
-          idempotencyKey: `slack:${event.teamId}:${event.channelId}:${postedMessage.messageTs}`,
-          processingIntent: "capture",
         });
       }
 
@@ -134,6 +142,120 @@ export class SlackListenerUseCase {
     }
   }
 
+  private async streamWorkerEventWithFallback(
+    event: NormalizedSlackMessageEvent & { processingIntent: "invoke" },
+  ) {
+    const replyThreadTs = event.threadTs ?? event.messageTs;
+    let streamMessageTs: string | null = null;
+    let streamedText = "";
+
+    try {
+      const workerReply = await this.workerClient.streamSlackMessageEvent(event, {
+        onDelta: async ({ text }) => {
+          if (!text) {
+            return;
+          }
+
+          streamedText += text;
+
+          if (!streamMessageTs) {
+            const started = await this.startSlackStreamWithRetry({
+              channelId: event.channelId,
+              threadTs: replyThreadTs,
+              recipientTeamId: event.teamId,
+              recipientUserId: event.userId,
+              text,
+            });
+            streamMessageTs = started.messageTs;
+            return;
+          }
+
+          await this.appendSlackStreamWithRetry({
+            channelId: event.channelId,
+            streamTs: streamMessageTs,
+            text,
+          });
+        },
+      });
+
+      if (workerReply.status === "error") {
+        if (streamMessageTs) {
+          await this.stopSlackStreamWithRetry({
+            channelId: event.channelId,
+            streamTs: streamMessageTs,
+            text: FALLBACK_REPLY_TEXT,
+          });
+        } else {
+          await this.sendFallbackReply(event);
+        }
+
+        return workerReply;
+      }
+
+      if (workerReply.status === "no_reply") {
+        if (streamMessageTs) {
+          await this.stopSlackStreamWithRetry({
+            channelId: event.channelId,
+            streamTs: streamMessageTs,
+            text: streamedText,
+          });
+        }
+
+        return workerReply;
+      }
+
+      if (!streamMessageTs) {
+        const started = await this.startSlackStreamWithRetry({
+          channelId: event.channelId,
+          threadTs: replyThreadTs,
+          recipientTeamId: event.teamId,
+          recipientUserId: event.userId,
+          text: workerReply.text,
+        });
+        streamMessageTs = started.messageTs;
+      }
+
+      const stopped = await this.stopSlackStreamWithRetry({
+        channelId: event.channelId,
+        streamTs: streamMessageTs,
+        text: workerReply.text,
+      });
+
+      try {
+        await this.captureBotReply(event, {
+          text: workerReply.text,
+          messageTs: stopped.messageTs,
+          threadTs: replyThreadTs,
+        });
+      } catch (error) {
+        this.logger.error("Failed to capture streamed Slack bot reply", {
+          ...buildSafeLogMetadata(event),
+          streamMessageTs: stopped.messageTs,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+      }
+
+      return workerReply;
+    } catch (error) {
+      this.logger.error("Failed to stream Worker reply to Slack", {
+        ...buildSafeLogMetadata(event),
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+
+      if (streamMessageTs) {
+        await this.stopSlackStreamWithRetry({
+          channelId: event.channelId,
+          streamTs: streamMessageTs,
+          text: FALLBACK_REPLY_TEXT,
+        });
+      } else {
+        await this.sendFallbackReply(event);
+      }
+
+      return null;
+    }
+  }
+
   private async sendFallbackReply(event: NormalizedSlackMessageEvent): Promise<void> {
     try {
       await this.sendSlackMessageWithRetry({
@@ -149,12 +271,77 @@ export class SlackListenerUseCase {
     }
   }
 
+  private async captureBotReply(
+    event: NormalizedSlackMessageEvent,
+    input: {
+      text: string;
+      messageTs: string;
+      threadTs: string;
+    },
+  ): Promise<void> {
+    await this.workerClient.sendSlackMessageEvent({
+      source: "slack",
+      teamId: event.teamId,
+      channelId: event.channelId,
+      userId: this.botUserId,
+      text: input.text,
+      messageTs: input.messageTs,
+      threadTs: input.threadTs,
+      channelType: event.channelType,
+      isMention: false,
+      isThreadMessage: true,
+      idempotencyKey: `slack:${event.teamId}:${event.channelId}:${input.messageTs}`,
+      processingIntent: "capture",
+    });
+  }
+
   private async sendSlackMessageWithRetry(input: {
     channelId: string;
     threadTs: string;
     text: string;
   }) {
     return retry(() => this.slackMessenger.sendMessage(input), {
+      attempts: 3,
+      initialDelayMs: 1_000,
+      maxDelayMs: 1_000,
+      factor: 1,
+    });
+  }
+
+  private async startSlackStreamWithRetry(input: {
+    channelId: string;
+    threadTs: string;
+    recipientTeamId: string;
+    recipientUserId: string;
+    text: string;
+  }) {
+    return retry(() => this.slackMessenger.startStream(input), {
+      attempts: 3,
+      initialDelayMs: 1_000,
+      maxDelayMs: 1_000,
+      factor: 1,
+    });
+  }
+
+  private async appendSlackStreamWithRetry(input: {
+    channelId: string;
+    streamTs: string;
+    text: string;
+  }): Promise<void> {
+    await retry(() => this.slackMessenger.appendStream(input), {
+      attempts: 3,
+      initialDelayMs: 1_000,
+      maxDelayMs: 1_000,
+      factor: 1,
+    });
+  }
+
+  private async stopSlackStreamWithRetry(input: {
+    channelId: string;
+    streamTs: string;
+    text?: string;
+  }) {
+    return retry(() => this.slackMessenger.stopStream(input), {
       attempts: 3,
       initialDelayMs: 1_000,
       maxDelayMs: 1_000,

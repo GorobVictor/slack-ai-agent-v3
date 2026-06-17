@@ -38,3 +38,23 @@ export type WorkerSlackReplyResponse =
 export type SlackWorkerRequest = NormalizedSlackMessageEvent & {
   processingIntent: SlackProcessingIntent;
 };
+
+export type WorkerSlackStreamEvent =
+  | {
+      type: "delta";
+      text: string;
+    }
+  | {
+      type: "done";
+      text: string;
+      threadTs?: string;
+    }
+  | {
+      type: "no_reply";
+      reason?: string;
+    }
+  | {
+      type: "error";
+      code: string;
+      message: string;
+    };

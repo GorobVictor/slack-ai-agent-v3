@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type {
   SlackWorkerRequest,
+  WorkerSlackStreamEvent,
   WorkerSlackReplyResponse,
 } from "./slack.types.js";
 
@@ -40,6 +41,27 @@ const workerSlackReplyResponseSchema = z.discriminatedUnion("status", [
   }),
 ]);
 
+const workerSlackStreamEventSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("delta"),
+    text: z.string().min(1),
+  }),
+  z.object({
+    type: z.literal("done"),
+    text: z.string(),
+    threadTs: z.string().min(1).optional(),
+  }),
+  z.object({
+    type: z.literal("no_reply"),
+    reason: z.string().min(1).optional(),
+  }),
+  z.object({
+    type: z.literal("error"),
+    code: z.string().min(1),
+    message: z.string().min(1),
+  }),
+]);
+
 export function parseNormalizedSlackMessageEvent(
   value: unknown,
 ): SlackWorkerRequest | null {
@@ -49,5 +71,10 @@ export function parseNormalizedSlackMessageEvent(
 
 export function parseWorkerSlackReplyResponse(value: unknown): WorkerSlackReplyResponse | null {
   const result = workerSlackReplyResponseSchema.safeParse(value);
+  return result.success ? result.data : null;
+}
+
+export function parseWorkerSlackStreamEvent(value: unknown): WorkerSlackStreamEvent | null {
+  const result = workerSlackStreamEventSchema.safeParse(value);
   return result.success ? result.data : null;
 }

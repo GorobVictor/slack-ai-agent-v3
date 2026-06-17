@@ -1,8 +1,9 @@
-import { Think, type SkillSource } from "@cloudflare/think";
+import { Think, type SkillSource, type StreamCallback } from "@cloudflare/think";
 import { type LanguageModel, type ToolSet, type UIMessage } from "ai";
 
 import { D1GeneratedSkillAdapter } from "../../adapters/storage/d1-generated-skill.adapter.js";
 import { D1SlackMessageHistoryAdapter } from "../../adapters/storage/d1-slack-message-history.adapter.js";
+import type { ThinkSessionStreamCallbacks } from "../../ports/think-session.port.js";
 import {
   buildSlackAgentSystemPrompt,
   buildSlackUserMessagePrompt,
@@ -11,6 +12,7 @@ import type { SlackWorkerRequest } from "../slack/slack.types.js";
 import { createSlackAgentModel } from "./agent-model.js";
 import { createSlackAgentSkillSources } from "./agent.skills.js";
 import { createSlackAgentTools } from "./agent.tools.js";
+import { extractTextDeltaFromThinkStreamChunk } from "./think-stream.js";
 import type {
   RunSlackTurnInput,
   RunSlackTurnResult,
@@ -73,6 +75,67 @@ export class SlackThinkAgent extends Think<SlackThinkAgentEnv> {
 
     if (result.status !== "completed") {
       throw new Error(`Think turn did not complete: ${result.status}`);
+    }
+
+    const replyText = extractLatestAssistantText(await this.getMessages(), beforeMessageIds);
+
+    if (!replyText) {
+      throw new Error("Think turn completed without an assistant text reply");
+    }
+
+    this.cacheSlackTurnReply(input.event.idempotencyKey, replyText);
+
+    return { text: replyText };
+  }
+
+  async runSlackTurnStream(
+    input: RunSlackTurnInput,
+    callbacks: ThinkSessionStreamCallbacks,
+  ): Promise<RunSlackTurnResult> {
+    this.ensureSlackTurnLedger();
+
+    const existingReply = this.readCachedSlackTurnReply(input.event.idempotencyKey);
+
+    if (existingReply) {
+      await callbacks.onTextDelta(existingReply);
+      return { text: existingReply };
+    }
+
+    const beforeMessageIds = new Set(this.messages.map((message) => message.id));
+    let streamError: string | null = null;
+    let wasInterrupted = false;
+    this.activeSlackEvent = input.event;
+
+    const callback: StreamCallback = {
+      onStart() {},
+      async onEvent(json) {
+        const delta = extractTextDeltaFromThinkStreamChunk(json);
+
+        if (delta) {
+          await callbacks.onTextDelta(delta);
+        }
+      },
+      onDone() {},
+      onError(error) {
+        streamError = error;
+      },
+      onInterrupted() {
+        wasInterrupted = true;
+      },
+    };
+
+    try {
+      await this.chat(buildSlackUserMessagePrompt(input.event), callback);
+    } finally {
+      this.activeSlackEvent = null;
+    }
+
+    if (streamError) {
+      throw new Error(`Think stream failed: ${streamError}`);
+    }
+
+    if (wasInterrupted) {
+      throw new Error("Think stream was interrupted before completion");
     }
 
     const replyText = extractLatestAssistantText(await this.getMessages(), beforeMessageIds);

@@ -2,9 +2,14 @@ import { App, LogLevel } from "@slack/bolt";
 
 import type { LoggerPort } from "../../ports/logger.port.js";
 import type {
+  AppendSlackMessageStreamInput,
   SendSlackMessageInput,
   SendSlackMessageResult,
   SlackMessengerPort,
+  StartSlackMessageStreamInput,
+  StartSlackMessageStreamResult,
+  StopSlackMessageStreamInput,
+  StopSlackMessageStreamResult,
 } from "../../ports/slack-messenger.port.js";
 import type { SlackSocketPort } from "../../ports/slack-socket.port.js";
 import { AppError } from "../../shared/errors.js";
@@ -70,6 +75,52 @@ export class SlackSocketModeAdapter implements SlackSocketPort, SlackMessengerPo
 
     return {
       messageTs: response.ts,
+    };
+  }
+
+  async startStream(
+    input: StartSlackMessageStreamInput,
+  ): Promise<StartSlackMessageStreamResult> {
+    const response = await this.app.client.chat.startStream({
+      channel: input.channelId,
+      thread_ts: input.threadTs,
+      recipient_team_id: input.recipientTeamId,
+      recipient_user_id: input.recipientUserId,
+      markdown_text: input.text,
+    });
+
+    if (!response.ts) {
+      throw new AppError("SLACK_STREAM_TS_MISSING", "Slack did not return a stream timestamp");
+    }
+
+    return {
+      messageTs: response.ts,
+    };
+  }
+
+  async appendStream(input: AppendSlackMessageStreamInput): Promise<void> {
+    if (!input.text) {
+      return;
+    }
+
+    await this.app.client.chat.appendStream({
+      channel: input.channelId,
+      ts: input.streamTs,
+      markdown_text: input.text,
+    });
+  }
+
+  async stopStream(
+    input: StopSlackMessageStreamInput,
+  ): Promise<StopSlackMessageStreamResult> {
+    const response = await this.app.client.chat.stopStream({
+      channel: input.channelId,
+      ts: input.streamTs,
+      ...(input.text ? { markdown_text: input.text } : {}),
+    });
+
+    return {
+      messageTs: response.ts ?? response.message?.ts ?? input.streamTs,
     };
   }
 

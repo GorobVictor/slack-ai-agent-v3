@@ -8,6 +8,10 @@ import type {
   WorkerSlackReplyResponse,
 } from "./slack.types.js";
 
+export type SlackMessageStreamCallbacks = {
+  onTextDelta(text: string): Promise<void> | void;
+};
+
 export class HandleSlackMessageUseCase {
   constructor(
     private readonly thinkSession: ThinkSessionPort,
@@ -62,6 +66,77 @@ export class HandleSlackMessageUseCase {
       sessionId,
       event,
     });
+
+    if (!reply.text.trim()) {
+      return {
+        status: "no_reply",
+        reason: "empty_agent_reply",
+      };
+    }
+
+    await this.enqueueSkillReflection(event, reply.text);
+
+    return {
+      status: "reply",
+      text: reply.text,
+      threadTs: event.threadTs ?? event.messageTs,
+    };
+  }
+
+  async executeStream(
+    event: SlackWorkerRequest,
+    callbacks: SlackMessageStreamCallbacks,
+  ): Promise<WorkerSlackReplyResponse> {
+    const sessionId = resolveSlackSessionId(event);
+    const saveResult = await this.history.saveMessage(event);
+
+    this.logger.info("Captured Slack message", {
+      sessionId,
+      teamId: event.teamId,
+      channelId: event.channelId,
+      threadTs: event.threadTs,
+      messageTs: event.messageTs,
+      eventId: event.eventId,
+      channelType: event.channelType,
+      isMention: event.isMention,
+      isThreadMessage: event.isThreadMessage,
+      processingIntent: event.processingIntent,
+      captureStatus: saveResult.status,
+    });
+
+    if (event.processingIntent === "capture") {
+      return {
+        status: "no_reply",
+        reason: "capture_only",
+      };
+    }
+
+    if (saveResult.status === "duplicate") {
+      return {
+        status: "no_reply",
+        reason: "duplicate_message",
+      };
+    }
+
+    this.logger.info("Streaming Slack message to Think session", {
+      sessionId,
+      teamId: event.teamId,
+      channelId: event.channelId,
+      threadTs: event.threadTs,
+      messageTs: event.messageTs,
+      eventId: event.eventId,
+      channelType: event.channelType,
+    });
+
+    const reply = await this.thinkSession.streamSlackMessage(
+      {
+        sessionId,
+        event,
+      },
+      {
+        onTextDelta: callbacks.onTextDelta,
+      },
+    );
 
     if (!reply.text.trim()) {
       return {

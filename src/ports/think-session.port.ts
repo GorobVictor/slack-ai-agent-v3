@@ -9,6 +9,14 @@ export type ThinkSessionReply = {
   text: string;
 };
 
+export type ThinkSessionStreamCallbacks = {
+  onTextDelta(text: string): Promise<void> | void;
+};
+
 export interface ThinkSessionPort {
   submitSlackMessage(input: SubmitSlackMessageToThinkInput): Promise<ThinkSessionReply>;
+  streamSlackMessage(
+    input: SubmitSlackMessageToThinkInput,
+    callbacks: ThinkSessionStreamCallbacks,
+  ): Promise<ThinkSessionReply>;
 }

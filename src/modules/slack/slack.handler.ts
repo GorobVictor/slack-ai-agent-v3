@@ -2,7 +2,7 @@ import type { LoggerPort } from "../../ports/logger.port.js";
 import { timingSafeEqual } from "../../tools/crypto.tool.js";
 import { parseNormalizedSlackMessageEvent } from "./slack.validation.js";
 import type { HandleSlackMessageUseCase } from "./handle-slack-message.use-case.js";
-import type { WorkerSlackReplyResponse } from "./slack.types.js";
+import type { WorkerSlackReplyResponse, WorkerSlackStreamEvent } from "./slack.types.js";
 
 export type SlackHandlerOptions = {
   internalApiToken: string;
@@ -51,6 +51,10 @@ export async function handleSlackEventRequest(
   }
 
   try {
+    if (acceptsStream(request)) {
+      return streamResponse(event, options);
+    }
+
     const response = await options.useCase.execute(event);
     return jsonResponse(response);
   } catch (error) {
@@ -73,6 +77,82 @@ export async function handleSlackEventRequest(
       500,
     );
   }
+}
+
+function streamResponse(event: Parameters<HandleSlackMessageUseCase["execute"]>[0], options: SlackHandlerOptions): Response {
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      const write = (streamEvent: WorkerSlackStreamEvent) => {
+        controller.enqueue(encoder.encode(`${JSON.stringify(streamEvent)}\n`));
+      };
+
+      try {
+        const response = await options.useCase.executeStream(event, {
+          onTextDelta(text) {
+            write({
+              type: "delta",
+              text,
+            });
+          },
+        });
+
+        write(toStreamTerminalEvent(response));
+      } catch (error) {
+        options.logger.error("Failed to stream Slack event in Worker", {
+          teamId: event.teamId,
+          channelId: event.channelId,
+          threadTs: event.threadTs,
+          messageTs: event.messageTs,
+          eventId: event.eventId,
+          channelType: event.channelType,
+          error: error instanceof Error ? error.message : "Unknown error",
+        });
+
+        write({
+          type: "error",
+          code: "SLACK_EVENT_PROCESSING_FAILED",
+          message: "Failed to process Slack event",
+        });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Cache-Control": "no-store",
+      "Content-Type": "application/x-ndjson; charset=utf-8",
+    },
+  });
+}
+
+function acceptsStream(request: Request): boolean {
+  return request.headers.get("Accept")?.includes("application/x-ndjson") ?? false;
+}
+
+function toStreamTerminalEvent(response: WorkerSlackReplyResponse): WorkerSlackStreamEvent {
+  if (response.status === "reply") {
+    return {
+      type: "done",
+      text: response.text,
+      threadTs: response.threadTs,
+    };
+  }
+
+  if (response.status === "no_reply") {
+    return {
+      type: "no_reply",
+      reason: response.reason,
+    };
+  }
+
+  return {
+    type: "error",
+    code: response.code,
+    message: response.message,
+  };
 }
 
 async function isAuthorized(request: Request, internalApiToken: string): Promise<boolean> {
