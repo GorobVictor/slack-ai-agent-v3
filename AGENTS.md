@@ -116,6 +116,7 @@ Important behavior:
 - Post-turn reflection lives in `src/modules/agent/skill-reflection.use-case.ts`.
 - Queue-backed reflection jobs are produced through `SkillReflectionQueuePort` and tracked in D1 table `skill_reflection_jobs`.
 - Reflection should use reduced Slack history context and reasoning-disabled model settings because it is routine extraction/classification work.
+- Keep generated-skill reflection model-facing schemas compact; enforce strict safety, quality, and required-field policy in TypeScript after parsing.
 - Generated skill bodies are typed as `GeneratedSkillBody`, stored in `body_json`, and rendered to canonical markdown with `src/modules/agent/generated-skill-body.ts`.
 - Skill reflection returns a `skip`, `create`, or `update` decision. Updates mark the current row `is_old = 1` and insert a new row with the next version.
 - Runtime loading must only use current enabled skills where `disabled = 0` and `is_old = 0`.
