@@ -98,7 +98,8 @@ Important behavior:
 - Cloudflare AI Gateway is configured by `AI_GATEWAY_ID` in `wrangler.jsonc`; use `default` unless a named gateway is required.
 - Runtime skills come only from D1-backed generated skills through `createSlackAgentSkillSources()`.
 - Do not add repository skill manifests for runtime skills.
-- After a successful invoked Slack turn, `SlackThinkAgent` runs `ReflectOnSlackConversationForSkillUseCase` to extract reusable workflows, compare them with the current generated skill catalog, validate decisions with `generated-skill-policy`, and save approved create or update decisions into D1.
+- After a successful invoked Slack turn, the Worker queues a generated-skill reflection job instead of blocking the Slack reply. The Queue consumer runs `ReflectOnSlackConversationForSkillUseCase` to extract reusable workflows, compare them with the current generated skill catalog, validate decisions with `generated-skill-policy`, and save approved create or update decisions into D1.
+- Skill reflection jobs do not use the Slack conversation Think `sessionId`; they carry the Slack event and assistant reply as queue payload.
 - Generated skills are universal and not scoped to workspace, channel, thread, or user.
 - Disable a generated skill by setting `disabled = 1` in D1; disabled skills remain stored but are not loaded by Think.
 
@@ -112,6 +113,7 @@ Important behavior:
 - Think loads enabled skills through `src/modules/agent/generated-skill-source.ts`.
 - Auto-approval policy lives in `src/modules/agent/generated-skill-policy.ts`.
 - Post-turn reflection lives in `src/modules/agent/skill-reflection.use-case.ts`.
+- Queue-backed reflection jobs are produced through `SkillReflectionQueuePort` and tracked in D1 table `skill_reflection_jobs`.
 - Generated skill bodies are typed as `GeneratedSkillBody`, stored in `body_json`, and rendered to canonical markdown with `src/modules/agent/generated-skill-body.ts`.
 - Skill reflection returns a `skip`, `create`, or `update` decision. Updates mark the current row `is_old = 1` and insert a new row with the next version.
 - Runtime loading must only use current enabled skills where `disabled = 0` and `is_old = 0`.
@@ -161,6 +163,7 @@ Use existing ports before adding new ones:
 - `ThinkSessionPort` for Worker-to-Think submission.
 - `SlackMessageHistoryPort` for D1-backed Slack history.
 - `GeneratedSkillPort` for D1-backed generated agent skills.
+- `SkillReflectionQueuePort` for queue-backed post-turn generated-skill reflection.
 - `TrackedThreadStorePort` for listener-side tracked thread metadata.
 - `LoggerPort` for structured logging.
 
@@ -203,6 +206,7 @@ AI_GATEWAY_ID
 AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB
+SKILL_REFLECTION_QUEUE
 WORKER_INTERNAL_API_TOKEN
 ```
 
@@ -249,9 +253,11 @@ Current focused test areas:
 - `src/modules/slack/slack-history-summary.use-case.test.ts`.
 - `src/adapters/storage/d1-slack-message-history.adapter.test.ts`.
 - `src/adapters/storage/d1-generated-skill.adapter.test.ts`.
+- `src/adapters/storage/d1-skill-reflection-job-ledger.adapter.test.ts`.
 - `src/modules/agent/generated-skill-policy.test.ts`.
 - `src/modules/agent/generated-skill-body.test.ts`.
 - `src/modules/agent/generated-skill-source.test.ts`.
+- `src/modules/agent/skill-reflection-job.test.ts`.
 - `src/modules/agent/skill-reflection.use-case.test.ts`.
 - `src/modules/agent/agent.skills.test.ts`.
 

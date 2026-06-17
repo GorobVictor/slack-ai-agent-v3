@@ -11,6 +11,9 @@ flowchart LR
   worker --> history["D1 slack_messages"]
   worker -->|"invoke only"| think["SlackThinkAgent"]
   think --> worker
+  worker -->|"enqueue reflection"| queue["Cloudflare Queue"]
+  queue --> reflection["Skill reflection consumer"]
+  reflection --> skills["D1 generated_skills"]
   worker --> listener
   listener -->|"chat.postMessage"| slackApi["Slack Web API"]
   slackApi --> listener
@@ -114,6 +117,7 @@ flowchart TD
   session --> thinkPort["ThinkSessionPort.submitSlackMessage()"]
   thinkPort --> agent["SlackThinkAgent.runSlackTurn()"]
   agent --> workerReply["WorkerSlackReplyResponse"]
+  workerReply --> queueReflection["SkillReflectionQueuePort.enqueue()"]
 ```
 
 Important Worker methods and functions:
@@ -121,6 +125,7 @@ Important Worker methods and functions:
 - `handleSlackEventRequest()` validates method, bearer token, JSON body, and request shape.
 - `parseNormalizedSlackMessageEvent()` validates `SlackWorkerRequest` with Zod.
 - `HandleSlackMessageUseCase.execute()` saves history, handles duplicates, and invokes Think when needed.
+- `SkillReflectionQueuePort.enqueue()` queues post-turn generated-skill reflection after successful invoke replies.
 - `resolveSlackSessionId()` maps Slack context to a Think session id.
 - `ThinkSessionAdapter.submitSlackMessage()` calls `SlackThinkAgent.runSlackTurn()`.
 - `D1SlackMessageHistoryAdapter.saveMessage()` inserts Slack history idempotently.
@@ -161,7 +166,9 @@ AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 
 Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`. Generated agent skills are stored in D1 table `generated_skills` through `GeneratedSkillPort`.
 
-Generated skills are learned after successful invoked Slack turns. Reflection receives recent Slack context and the current generated skill catalog, then returns a `skip`, `create`, or `update` decision. Approved skills store typed `body_json` plus canonical rendered `body` markdown. Updates preserve history by marking the old row with `is_old = 1` and inserting a new current version.
+Generated skills are learned asynchronously after successful invoked Slack turns. The Worker enqueues a skill reflection job after it has a non-empty Think reply, then the Queue consumer loads recent Slack context and the current generated skill catalog, returning a `skip`, `create`, or `update` decision. Approved skills store typed `body_json` plus canonical rendered `body` markdown. Updates preserve history by marking the old row with `is_old = 1` and inserting a new current version.
+
+Reflection jobs do not use the Slack conversation Think `sessionId`; they carry the Slack event and assistant reply as queue payload. D1 table `skill_reflection_jobs` tracks queue job idempotency by Slack `idempotencyKey`.
 
 ```mermaid
 flowchart TD
@@ -219,6 +226,7 @@ Current idempotency behavior:
 - `D1SlackMessageHistoryAdapter.saveMessage()` uses `INSERT OR IGNORE`.
 - `HandleSlackMessageUseCase.execute()` returns `no_reply` with `reason: "duplicate_message"` for duplicate invoke events.
 - `SlackThinkAgent.runSlackTurn()` caches Think replies in `slack_turn_replies`.
+- `D1SkillReflectionJobLedgerAdapter` skips already completed reflection jobs and allows failed queue messages to retry.
 
 ## Contracts
 
@@ -315,6 +323,7 @@ AI_GATEWAY_ID
 AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB
+SKILL_REFLECTION_QUEUE
 ```
 
 ## Repository Layout
