@@ -4,7 +4,7 @@ import type {
   SlackProcessingIntent,
 } from "../slack/slack.types.js";
 
-export type { NormalizedSlackMessageEvent, SlackChannelType, SlackProcessingIntent };
+export type { NormalizedSlackMessageEvent, SlackChannelType };
 
 export type SlackEventKind =
   | "app_mention"
@@ -18,7 +18,7 @@ export type SlackRawEventEnvelope = {
   body?: unknown;
 };
 
-export type SlackMessageMetadata = {
+type SlackMessageMetadata = {
   eventType: SlackEventKind;
   hasFilesOrAttachments: boolean;
   threadId: string;

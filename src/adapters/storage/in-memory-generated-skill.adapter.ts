@@ -1,6 +1,5 @@
 import type {
   GeneratedSkill,
-  GeneratedSkillCatalogStats,
   GeneratedSkillPort,
   SaveAutoApprovedSkillDecisionInput,
   SaveAutoApprovedSkillDecisionResult,
@@ -86,17 +85,6 @@ export class InMemoryGeneratedSkillAdapter implements GeneratedSkillPort {
     );
   }
 
-  async getEnabledCatalogStats(): Promise<GeneratedSkillCatalogStats> {
-    const enabledSkills = await this.listEnabledSkills();
-
-    return {
-      enabledCount: enabledSkills.length,
-      maxUpdatedAt: enabledSkills.reduce(
-        (maxUpdatedAt, skill) => Math.max(maxUpdatedAt, skill.updatedAt),
-        0,
-      ),
-    };
-  }
 }
 
 function isUnchanged(

@@ -1,4 +1,4 @@
-export type GeneratedSkillBodyToolUsage = {
+type GeneratedSkillBodyToolUsage = {
   tool: "getSlackHistoryContext";
   when: string;
 };
@@ -51,11 +51,6 @@ export type SaveAutoApprovedSkillDecisionResult = {
   skill: GeneratedSkill | null;
 };
 
-export type GeneratedSkillCatalogStats = {
-  enabledCount: number;
-  maxUpdatedAt: number;
-};
-
 export interface GeneratedSkillPort {
   saveAutoApprovedSkillDecision(
     input: SaveAutoApprovedSkillDecisionInput,
@@ -63,5 +58,4 @@ export interface GeneratedSkillPort {
   listEnabledSkills(): Promise<GeneratedSkill[]>;
   loadEnabledSkill(name: string): Promise<GeneratedSkill | null>;
   findSkillByName(name: string): Promise<GeneratedSkill | null>;
-  getEnabledCatalogStats(): Promise<GeneratedSkillCatalogStats>;
 }

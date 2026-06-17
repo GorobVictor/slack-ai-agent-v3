@@ -57,7 +57,7 @@ const skillReflectionDecisionSchema = z.object({
 
 type ModelSkillReflectionDecision = z.infer<typeof skillReflectionDecisionSchema>;
 
-export const SKILL_REFLECTION_HISTORY_DAYS = 3;
+const SKILL_REFLECTION_HISTORY_DAYS = 3;
 export const SKILL_REFLECTION_HISTORY_LIMIT = 50;
 export const SKILL_REFLECTION_MAX_OUTPUT_TOKENS = 5_000;
 
@@ -76,7 +76,7 @@ export type SkillReflectionResult =
       reason: string;
     };
 
-export type SkillReflectionCandidateGeneratorInput = SkillReflectionInput & {
+type SkillReflectionCandidateGeneratorInput = SkillReflectionInput & {
   historyContext: string;
   existingSkillsCatalog: string;
 };

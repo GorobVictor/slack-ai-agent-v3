@@ -9,7 +9,7 @@ import {
 } from "../../prompts/generated-skills.prompts.js";
 import { normalizeGeneratedSkillBody } from "./generated-skill-body.js";
 
-export const GENERATED_SKILL_ALLOWED_TOOLS = [GENERATED_SKILL_ALLOWED_TOOL] as const;
+const GENERATED_SKILL_ALLOWED_TOOLS = [GENERATED_SKILL_ALLOWED_TOOL] as const;
 
 export type TypedGeneratedSkillCandidate = {
   name: string;
@@ -163,15 +163,6 @@ export function validateGeneratedSkillCandidate(
       action: "create",
       candidate: approvedCandidate,
     },
-  };
-}
-
-export function toLegacyCandidate(
-  candidate: AutoApprovedGeneratedSkillCandidate,
-): TypedGeneratedSkillCandidate {
-  return {
-    ...candidate,
-    reason: candidate.autoApprovalReason,
   };
 }
 

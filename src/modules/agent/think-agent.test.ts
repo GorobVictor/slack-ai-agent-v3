@@ -3,9 +3,10 @@ import { describe, expect, it } from "vitest";
 import { buildWorkersAIGatewayOptions } from "./agent-ai-gateway.js";
 import {
   DEFAULT_REFLECTION_AI_MODEL,
-  FAST_REFLECTION_AI_MODEL_FALLBACK,
   readReflectionModel,
 } from "./agent-model.js";
+
+const REFLECTION_AI_MODEL = "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 
 describe("buildWorkersAIGatewayOptions", () => {
   it("uses the default Cloudflare AI Gateway when no gateway is configured", () => {
@@ -33,9 +34,9 @@ describe("readReflectionModel", () => {
       readReflectionModel({
         ai: {} as Ai,
         aiModel: "@cf/google/gemma-4-26b-a4b-it",
-        reflectionAiModel: FAST_REFLECTION_AI_MODEL_FALLBACK,
+        reflectionAiModel: REFLECTION_AI_MODEL,
       }),
-    ).toBe(FAST_REFLECTION_AI_MODEL_FALLBACK);
+    ).toBe(REFLECTION_AI_MODEL);
   });
 
   it("falls back to the main model when only AI_MODEL is configured", () => {

@@ -5,10 +5,8 @@ import { buildWorkersAIGatewayOptions } from "./agent-ai-gateway.js";
 
 type WorkersAIChatSettings = NonNullable<Parameters<ReturnType<typeof createWorkersAI>>[1]>;
 
-export const DEFAULT_WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
+const DEFAULT_WORKERS_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
 export const DEFAULT_REFLECTION_AI_MODEL = "@cf/google/gemma-4-26b-a4b-it";
-export const FAST_REFLECTION_AI_MODEL_FALLBACK =
-  "@cf/meta/llama-3.1-8b-instruct-fp8-fast";
 
 export type SlackAgentModelOptions = {
   ai: Ai;

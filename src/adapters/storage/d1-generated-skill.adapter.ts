@@ -1,7 +1,6 @@
 import type {
   GeneratedSkill,
   GeneratedSkillBody,
-  GeneratedSkillCatalogStats,
   GeneratedSkillPort,
   SaveAutoApprovedSkillDecisionInput,
   SaveAutoApprovedSkillDecisionResult,
@@ -27,11 +26,6 @@ type GeneratedSkillRow = {
   auto_approval_reason: string;
   created_at: number;
   updated_at: number;
-};
-
-type CatalogStatsRow = {
-  enabled_count: number;
-  max_updated_at: number | null;
 };
 
 export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
@@ -178,23 +172,6 @@ export class D1GeneratedSkillAdapter implements GeneratedSkillPort {
     return row ? mapRow(row) : null;
   }
 
-  async getEnabledCatalogStats(): Promise<GeneratedSkillCatalogStats> {
-    const row = await this.db
-      .prepare(
-        `
-          SELECT COUNT(*) AS enabled_count, MAX(updated_at) AS max_updated_at
-          FROM generated_skills
-          WHERE disabled = 0
-            AND is_old = 0
-        `,
-      )
-      .first<CatalogStatsRow>();
-
-    return {
-      enabledCount: row?.enabled_count ?? 0,
-      maxUpdatedAt: row?.max_updated_at ?? 0,
-    };
-  }
 }
 
 function isUnchanged(
