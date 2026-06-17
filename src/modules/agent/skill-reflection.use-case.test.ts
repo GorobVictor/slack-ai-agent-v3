@@ -127,6 +127,27 @@ describe("ReflectOnSlackConversationForSkillUseCase", () => {
       reason: "model unavailable",
     });
   });
+
+  it("throws candidate generation failures when strict error handling is enabled", async () => {
+    const history = new InMemorySlackMessageHistoryAdapter();
+    const skills = new InMemoryGeneratedSkillAdapter();
+    const currentEvent = event();
+    await history.saveMessage(currentEvent);
+
+    await expect(
+      new ReflectOnSlackConversationForSkillUseCase({
+        history,
+        skills,
+        generateCandidate: async () => {
+          throw new Error("model unavailable");
+        },
+        throwOnError: true,
+      }).execute({
+        event: currentEvent,
+        assistantReply: "Done.",
+      }),
+    ).rejects.toThrow("model unavailable");
+  });
 });
 
 function createDecision(): SkillReflectionDecision {
