@@ -5,7 +5,7 @@ import type {
   WorkerSlackReplyResponse,
 } from "./slack.types.js";
 
-const normalizedSlackMessageEventSchema = z.object({
+export const normalizedSlackMessageEventSchema = z.object({
   source: z.literal("slack"),
   teamId: z.string().min(1),
   channelId: z.string().min(1),

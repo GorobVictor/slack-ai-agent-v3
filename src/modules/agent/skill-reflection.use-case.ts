@@ -94,6 +94,7 @@ export type SkillReflectionUseCaseOptions = {
   skills: GeneratedSkillPort;
   generateCandidate: SkillReflectionCandidateGenerator;
   logger?: LoggerPort;
+  throwOnError?: boolean;
 };
 
 export class ReflectOnSlackConversationForSkillUseCase {
@@ -189,6 +190,10 @@ export class ReflectOnSlackConversationForSkillUseCase {
         name: saveResult.skill.name,
       };
     } catch (error) {
+      if (this.options.throwOnError) {
+        throw error;
+      }
+
       this.options.logger?.warn("[gen-skills] Skill reflection failed", {
         reason: error instanceof Error ? error.message : "Skill reflection failed.",
       });

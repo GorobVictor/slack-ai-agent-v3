@@ -1,4 +1,5 @@
 import type { LoggerPort } from "../../ports/logger.port.js";
+import type { SkillReflectionQueuePort } from "../../ports/skill-reflection-queue.port.js";
 import type { SlackMessageHistoryPort } from "../../ports/slack-message-history.port.js";
 import type { ThinkSessionPort } from "../../ports/think-session.port.js";
 import { resolveSlackSessionId } from "./slack-session-resolver.js";
@@ -12,6 +13,7 @@ export class HandleSlackMessageUseCase {
     private readonly thinkSession: ThinkSessionPort,
     private readonly history: SlackMessageHistoryPort,
     private readonly logger: LoggerPort,
+    private readonly skillReflectionQueue?: SkillReflectionQueuePort,
   ) {}
 
   async execute(event: SlackWorkerRequest): Promise<WorkerSlackReplyResponse> {
@@ -68,10 +70,45 @@ export class HandleSlackMessageUseCase {
       };
     }
 
+    await this.enqueueSkillReflection(event, reply.text);
+
     return {
       status: "reply",
       text: reply.text,
       threadTs: event.threadTs ?? event.messageTs,
     };
+  }
+
+  private async enqueueSkillReflection(
+    event: SlackWorkerRequest,
+    assistantReply: string,
+  ): Promise<void> {
+    if (!this.skillReflectionQueue) {
+      return;
+    }
+
+    try {
+      await this.skillReflectionQueue.enqueue({
+        event,
+        assistantReply,
+      });
+
+      this.logger.info("Queued Slack turn skill reflection", {
+        teamId: event.teamId,
+        channelId: event.channelId,
+        threadTs: event.threadTs,
+        messageTs: event.messageTs,
+        idempotencyKey: event.idempotencyKey,
+      });
+    } catch (error) {
+      this.logger.warn("Failed to queue Slack turn skill reflection", {
+        teamId: event.teamId,
+        channelId: event.channelId,
+        threadTs: event.threadTs,
+        messageTs: event.messageTs,
+        idempotencyKey: event.idempotencyKey,
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   }
 }

@@ -19,6 +19,23 @@
       "migrations_dir": "migrations"
     }
   ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "SKILL_REFLECTION_QUEUE",
+        "queue": "slack-ai-agent-v3-skill-reflection"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "slack-ai-agent-v3-skill-reflection",
+        "max_batch_size": 5,
+        "max_batch_timeout": 10,
+        "max_retries": 5,
+        "dead_letter_queue": "slack-ai-agent-v3-skill-reflection-dlq"
+      }
+    ]
+  },
   "durable_objects": {
     "bindings": [
       {
