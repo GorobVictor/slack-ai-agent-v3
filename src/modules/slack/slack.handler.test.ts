@@ -40,6 +40,30 @@ describe("handleSlackEventRequest", () => {
       threadTs: "1710000000.000200",
     });
   });
+
+  it("streams Worker reply responses", async () => {
+    const response = await handleSlackEventRequest(
+      request(event(), "secret", {
+        Accept: "application/x-ndjson",
+      }),
+      options(),
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toContain("application/x-ndjson");
+    await expect(response.text()).resolves.toBe(
+      [
+        JSON.stringify({ type: "delta", text: "Hello " }),
+        JSON.stringify({ type: "delta", text: "from Think" }),
+        JSON.stringify({
+          type: "done",
+          text: "Hello from Think",
+          threadTs: "1710000000.000200",
+        }),
+        "",
+      ].join("\n"),
+    );
+  });
 });
 
 function options() {
@@ -50,6 +74,11 @@ function options() {
         async submitSlackMessage() {
           return { text: "Hello from Think" };
         },
+        async streamSlackMessage(_input, callbacks) {
+          await callbacks.onTextDelta("Hello ");
+          await callbacks.onTextDelta("from Think");
+          return { text: "Hello from Think" };
+        },
       },
       history(),
       logger,
@@ -58,10 +87,15 @@ function options() {
   };
 }
 
-function request(body: unknown, token?: string): Request {
+function request(body: unknown, token?: string, headers: Record<string, string> = {}): Request {
   return new Request("https://worker.example/slack/events", {
     method: "POST",
-    headers: token ? { Authorization: `Bearer ${token}` } : undefined,
+    headers: token
+      ? {
+          ...headers,
+          Authorization: `Bearer ${token}`,
+        }
+      : headers,
     body: JSON.stringify(body),
   });
 }

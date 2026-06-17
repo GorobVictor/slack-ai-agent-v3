@@ -240,6 +240,15 @@ function workerClient(
       events.push(event);
       return response;
     },
+    async streamSlackMessageEvent(event, callbacks) {
+      events.push(event);
+
+      if (response.status === "reply") {
+        await callbacks.onDelta({ text: response.text });
+      }
+
+      return response;
+    },
   };
 }
 
@@ -248,17 +257,39 @@ function failingWorkerClient(): WorkerEventClientPort {
     async sendSlackMessageEvent() {
       throw new Error("Worker unavailable");
     },
+    async streamSlackMessageEvent() {
+      throw new Error("Worker unavailable");
+    },
   };
 }
 
 function messenger(
   sentMessages: Array<{ channelId: string; threadTs: string; text: string }>,
 ): SlackMessengerPort {
+  const streamThreads = new Map<string, string>();
+
   return {
     async sendMessage(input) {
       sentMessages.push(input);
       return {
         messageTs: "1710000000.000999",
+      };
+    },
+    async startStream(input) {
+      streamThreads.set("1710000000.000999", input.threadTs);
+      return {
+        messageTs: "1710000000.000999",
+      };
+    },
+    async appendStream() {},
+    async stopStream(input) {
+      sentMessages.push({
+        channelId: input.channelId,
+        threadTs: streamThreads.get(input.streamTs) ?? input.streamTs,
+        text: input.text ?? "",
+      });
+      return {
+        messageTs: input.streamTs,
       };
     },
   };
@@ -269,6 +300,8 @@ function flakyMessenger(
   attempts: { count: number },
   failuresBeforeSuccess: number,
 ): SlackMessengerPort {
+  const streamThreads = new Map<string, string>();
+
   return {
     async sendMessage(input) {
       attempts.count += 1;
@@ -280,6 +313,29 @@ function flakyMessenger(
       sentMessages.push(input);
       return {
         messageTs: "1710000000.000999",
+      };
+    },
+    async startStream(input) {
+      attempts.count += 1;
+
+      if (attempts.count <= failuresBeforeSuccess) {
+        throw new Error("Slack API unavailable");
+      }
+
+      streamThreads.set("1710000000.000999", input.threadTs);
+      return {
+        messageTs: "1710000000.000999",
+      };
+    },
+    async appendStream() {},
+    async stopStream(input) {
+      sentMessages.push({
+        channelId: input.channelId,
+        threadTs: streamThreads.get(input.streamTs) ?? input.streamTs,
+        text: input.text ?? "",
+      });
+      return {
+        messageTs: input.streamTs,
       };
     },
   };

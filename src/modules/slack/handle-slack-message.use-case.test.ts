@@ -12,12 +12,7 @@ describe("HandleSlackMessageUseCase", () => {
     const calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [];
     const saved: SlackWorkerRequest[] = [];
     const useCase = new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage(input) {
-          calls.push(input);
-          return { text: "Hello from Think" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Hello from Think", calls),
       history(saved),
       logger,
     );
@@ -36,11 +31,7 @@ describe("HandleSlackMessageUseCase", () => {
   it("queues skill reflection after successful invoke replies", async () => {
     const queued: Array<{ event: SlackWorkerRequest; assistantReply: string }> = [];
     const useCase = new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage() {
-          return { text: "Hello from Think" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Hello from Think"),
       history([]),
       logger,
       queue(queued),
@@ -59,14 +50,40 @@ describe("HandleSlackMessageUseCase", () => {
     ]);
   });
 
+  it("streams Think deltas and queues reflection after streamed replies", async () => {
+    const queued: Array<{ event: SlackWorkerRequest; assistantReply: string }> = [];
+    const deltas: string[] = [];
+    const useCase = new HandleSlackMessageUseCase(
+      thinkSession("Hello from Think"),
+      history([]),
+      logger,
+      queue(queued),
+    );
+
+    await expect(
+      useCase.executeStream(event({ processingIntent: "invoke" }), {
+        onTextDelta(text) {
+          deltas.push(text);
+        },
+      }),
+    ).resolves.toEqual({
+      status: "reply",
+      text: "Hello from Think",
+      threadTs: "1710000000.000200",
+    });
+    expect(deltas).toEqual(["Hello from Think"]);
+    expect(queued).toEqual([
+      {
+        event: event({ processingIntent: "invoke" }),
+        assistantReply: "Hello from Think",
+      },
+    ]);
+  });
+
   it("returns the Slack reply when queueing skill reflection fails", async () => {
     const warnings: unknown[] = [];
     const useCase = new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage() {
-          return { text: "Hello from Think" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Hello from Think"),
       history([]),
       {
         ...logger,
@@ -89,12 +106,7 @@ describe("HandleSlackMessageUseCase", () => {
     const calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [];
     const saved: SlackWorkerRequest[] = [];
     const useCase = new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage(input) {
-          calls.push(input);
-          return { text: "Should not be called" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Should not be called", calls),
       history(saved),
       logger,
     );
@@ -109,11 +121,7 @@ describe("HandleSlackMessageUseCase", () => {
 
   it("returns no_reply for empty Think responses", async () => {
     const useCase = new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage() {
-          return { text: " " };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession(" "),
       history([]),
       logger,
     );
@@ -127,12 +135,7 @@ describe("HandleSlackMessageUseCase", () => {
   it("does not invoke Think for duplicate invoke events", async () => {
     const calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [];
     const useCase = new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage(input) {
-          calls.push(input);
-          return { text: "Should not be called" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Should not be called", calls),
       duplicateHistory(),
       logger,
     );
@@ -148,33 +151,21 @@ describe("HandleSlackMessageUseCase", () => {
     const queued: Array<{ event: SlackWorkerRequest; assistantReply: string }> = [];
 
     await new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage() {
-          return { text: "Should not be called" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Should not be called"),
       history([]),
       logger,
       queue(queued),
     ).execute(event({ processingIntent: "capture" }));
 
     await new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage() {
-          return { text: "Should not be called" };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession("Should not be called"),
       duplicateHistory(),
       logger,
       queue(queued),
     ).execute(event({ processingIntent: "invoke" }));
 
     await new HandleSlackMessageUseCase(
-      {
-        async submitSlackMessage() {
-          return { text: " " };
-        },
-      } satisfies ThinkSessionPort,
+      thinkSession(" "),
       history([]),
       logger,
       queue(queued),
@@ -189,6 +180,23 @@ const logger: LoggerPort = {
   warn() {},
   error() {},
 };
+
+function thinkSession(
+  text: string,
+  calls: Array<{ sessionId: string; event: SlackWorkerRequest }> = [],
+): ThinkSessionPort {
+  return {
+    async submitSlackMessage(input) {
+      calls.push(input);
+      return { text };
+    },
+    async streamSlackMessage(input, callbacks) {
+      calls.push(input);
+      await callbacks.onTextDelta(text);
+      return { text };
+    },
+  };
+}
 
 function history(saved: SlackWorkerRequest[]): SlackMessageHistoryPort {
   return {
