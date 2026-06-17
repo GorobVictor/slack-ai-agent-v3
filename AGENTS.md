@@ -95,6 +95,7 @@ Important behavior:
 - Think tools must call use cases and ports, not storage or Slack APIs directly.
 - Do not manually build a custom LLM loop unless the user explicitly asks for it.
 - The default Workers AI model is configured by `AI_MODEL` in `wrangler.jsonc`.
+- Generated-skill reflection uses `REFLECTION_AI_MODEL` in `wrangler.jsonc`; keep it separate from `AI_MODEL` so reflection latency and cost can be tuned independently.
 - Cloudflare AI Gateway is configured by `AI_GATEWAY_ID` in `wrangler.jsonc`; use `default` unless a named gateway is required.
 - Runtime skills come only from D1-backed generated skills through `createSlackAgentSkillSources()`.
 - Do not add repository skill manifests for runtime skills.
@@ -114,6 +115,7 @@ Important behavior:
 - Auto-approval policy lives in `src/modules/agent/generated-skill-policy.ts`.
 - Post-turn reflection lives in `src/modules/agent/skill-reflection.use-case.ts`.
 - Queue-backed reflection jobs are produced through `SkillReflectionQueuePort` and tracked in D1 table `skill_reflection_jobs`.
+- Reflection should use reduced Slack history context and reasoning-disabled model settings because it is routine extraction/classification work.
 - Generated skill bodies are typed as `GeneratedSkillBody`, stored in `body_json`, and rendered to canonical markdown with `src/modules/agent/generated-skill-body.ts`.
 - Skill reflection returns a `skip`, `create`, or `update` decision. Updates mark the current row `is_old = 1` and insert a new row with the next version.
 - Runtime loading must only use current enabled skills where `disabled = 0` and `is_old = 0`.
@@ -204,6 +206,7 @@ Important Worker bindings and vars:
 AI
 AI_GATEWAY_ID
 AI_MODEL
+REFLECTION_AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB
 SKILL_REFLECTION_QUEUE

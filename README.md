@@ -160,13 +160,14 @@ The default model and AI Gateway are configured in `wrangler.jsonc`:
 ```txt
 AI_GATEWAY_ID=default
 AI_MODEL=@cf/google/gemma-4-26b-a4b-it
+REFLECTION_AI_MODEL=@cf/google/gemma-4-26b-a4b-it
 ```
 
 ## Slack History And Summaries
 
 Slack history is stored in D1 table `slack_messages` through `SlackMessageHistoryPort`. Generated agent skills are stored in D1 table `generated_skills` through `GeneratedSkillPort`.
 
-Generated skills are learned asynchronously after successful invoked Slack turns. The Worker enqueues a skill reflection job after it has a non-empty Think reply, then the Queue consumer loads recent Slack context and the current generated skill catalog, returning a `skip`, `create`, or `update` decision. Approved skills store typed `body_json` plus canonical rendered `body` markdown. Updates preserve history by marking the old row with `is_old = 1` and inserting a new current version.
+Generated skills are learned asynchronously after successful invoked Slack turns. The Worker enqueues a skill reflection job after it has a non-empty Think reply, then the Queue consumer loads recent Slack context and the current generated skill catalog, returning a `skip`, `create`, or `update` decision. Reflection uses `REFLECTION_AI_MODEL`, reduced history context, and reasoning-disabled model settings to avoid routine extraction timeouts. Approved skills store typed `body_json` plus canonical rendered `body` markdown. Updates preserve history by marking the old row with `is_old = 1` and inserting a new current version.
 
 Reflection jobs do not use the Slack conversation Think `sessionId`; they carry the Slack event and assistant reply as queue payload. D1 table `skill_reflection_jobs` tracks queue job idempotency by Slack `idempotencyKey`.
 
@@ -321,6 +322,7 @@ Worker bindings and vars in `wrangler.jsonc`:
 AI
 AI_GATEWAY_ID
 AI_MODEL
+REFLECTION_AI_MODEL
 SLACK_THINK_AGENT
 SLACK_HISTORY_DB
 SKILL_REFLECTION_QUEUE
